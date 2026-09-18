@@ -403,7 +403,7 @@ elif aba == "2. Gerenciar Entradas (Green/Red)":
     conn.close()
 
 # ---------------------------------------------------------
-# ABA 3: DASHBOARD FINANCEIRO & PERFORMANCE
+# ABA 3: DASHBOARD FINANCEIRO & PERFORMANCE DETALHADA
 # ---------------------------------------------------------
 elif aba == "3. Dashboard Financeiro":
     st.header("📊 Painel de Desempenho Financeiro")
@@ -415,13 +415,23 @@ elif aba == "3. Dashboard Financeiro":
     if df_hist.empty:
         st.info("Nenhuma aposta finalizada no histórico para gerar métricas.")
     else:
-        total_apostas = len(df_hist[df_hist['status'].isin(['Green', 'Red'])])
-        greens = len(df_hist[df_hist['status'] == 'Green'])
-        reds = len(df_hist[df_hist['status'] == 'Red'])
+        # Filtro de Estratégias
+        estrategias_disponiveis = ["Todas as Estratégias"] + list(df_hist['script_origem'].unique())
+        est_selecionada = st.selectbox("🎯 Filtrar Visão por Estratégia:", estrategias_disponiveis)
+
+        if est_selecionada != "Todas as Estratégias":
+            df_filtrado = df_hist[df_hist['script_origem'] == est_selecionada].copy()
+        else:
+            df_filtrado = df_hist.copy()
+
+        # Métricas Globais ou Filtradas
+        total_apostas = len(df_filtrado[df_filtrado['status'].isin(['Green', 'Red'])])
+        greens = len(df_filtrado[df_filtrado['status'] == 'Green'])
+        reds = len(df_filtrado[df_filtrado['status'] == 'Red'])
         winrate = (greens / total_apostas * 100) if total_apostas > 0 else 0
 
-        total_investido = df_hist['valor_apostado'].sum()
-        lucro_total = df_hist['lucro_prejuizo'].sum()
+        total_investido = df_filtrado['valor_apostado'].sum()
+        lucro_total = df_filtrado['lucro_prejuizo'].sum()
         roi = (lucro_total / total_investido * 100) if total_investido > 0 else 0
 
         c1, c2, c3, c4, c5 = st.columns(5)
@@ -432,14 +442,37 @@ elif aba == "3. Dashboard Financeiro":
         c5.metric("Lucro Líquido", f"R$ {lucro_total:.2f}", delta=f"{roi:.1f}% ROI")
 
         st.divider()
-        st.subheader("📈 Performance Detalhada por Estratégia")
-        performance_script = df_hist.groupby('script_origem').agg(
-            Apostas=('id', 'count'),
-            Investimento=('valor_apostado', 'sum'),
-            Lucro_R=('lucro_prejuizo', 'sum')
-        ).reset_index()
 
-        st.dataframe(performance_script, use_container_width=True)
+        # Gráfico de Evolução do Lucro por Data
+        st.subheader("📈 Evolução Financeira Acumulada")
+        df_chart = df_filtrado.groupby('data_registro')['lucro_prejuizo'].sum().reset_index()
+        df_chart['Lucro_Acumulado'] = df_chart['lucro_prejuizo'].cumsum()
+        st.line_chart(df_chart.set_index('data_registro')['Lucro_Acumulado'])
 
-        st.subheader("📋 Histórico Completo de Entradas")
-        st.dataframe(df_hist[['data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']], use_container_width=True)
+        st.divider()
+
+        # Tabela Comparativa Geral por Estratégia
+        st.subheader("📊 Comparativo de Performance por Estratégia")
+        perf_list = []
+        for script, group in df_hist.groupby('script_origem'):
+            tot = len(group[group['status'].isin(['Green', 'Red'])])
+            g = len(group[group['status'] == 'Green'])
+            r = len(group[group['status'] == 'Red'])
+            wr = (g / tot * 100) if tot > 0 else 0
+            inv = group['valor_apostado'].sum()
+            luc = group['lucro_prejuizo'].sum()
+            roi_script = (luc / inv * 100) if inv > 0 else 0
+            perf_list.append({
+                'Estratégia': script,
+                'Entradas': tot,
+                'Greens': g,
+                'Reds': r,
+                'Assertividade (%)': f"{wr:.1f}%",
+                'Investimento (R$)': f"R$ {inv:.2f}",
+                'Lucro Líquido (R$)': f"R$ {luc:.2f}",
+                'ROI (%)': f"{roi_script:.1f}%"
+            })
+        st.dataframe(pd.DataFrame(perf_list), use_container_width=True)
+
+        st.subheader("📋 Histórico de Apostas Registradas")
+        st.dataframe(df_filtrado[['data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']], use_container_width=True)
