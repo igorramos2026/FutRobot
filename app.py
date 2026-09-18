@@ -381,19 +381,20 @@ elif aba == "2. Gerenciar Entradas (Green/Red)":
                     if st.button("🟢 Green", key=f"green_{row['id']}", use_container_width=True):
                         lucro = (odd_comprada - 1) * valor_apostado
                         c = conn.cursor()
-                        c.execute("UPDATE entradas SET status = 'Green', odd_comprada = ?, valor_apostado = ?, lucro_prejuizo = ? WHERE id = ?",
-                                  (odd_comprada, valor_apostado, lucro, row['id']))
+                        c.execute("UPDATE entradas SET status = 'Green', odd_comprada = ?, valor_apostado = ?, lucro_prejuizo = ? WHERE id = ?", (odd_comprada, valor_apostado, lucro, row['id']))
                         conn.commit()
                         st.rerun()
 
                     if st.button("🔴 Red", key=f"red_{row['id']}", use_container_width=True):
                         prejuizo = -valor_apostado
                         c = conn.cursor()
-                        c.execute("UPDATE entradas SET status = 'Red', odd_comprada = ?, valor_apostado = ?, lucro_prejuizo = ? WHERE id = ?",
-                                  (odd_comprada, valor_apostado, prejuizo, row['id']))
+                        c.execute("UPDATE entradas SET status = 'Red', odd_comprada = ?, valor_apostado = ?, lucro_prejuizo = ? WHERE id = ?", (odd_comprada, valor_apostado, prejuizo, row['id']))
                         conn.commit()
                         st.rerun()
 
                     if st.button("⚪ Anulada", key=f"null_{row['id']}", use_container_width=True):
                         c = conn.cursor()
-                        c.execute("UPDATE entradas SET status = 'Anulada', odd_comprada = ?, valor_apostado = ?, lucro_pr
+                        c.execute("UPDATE entradas SET status = 'Anulada', odd_comprada = ?, valor_apostado = ?, lucro_prejuizo = 0 WHERE id = ?", (odd_comprada, valor_apostado, row['id']))
+                        conn.commit()
+                        st.rerun()
+    conn.close()
