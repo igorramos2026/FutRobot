@@ -114,11 +114,20 @@ def processar_cantos(file):
         st.error(f"Erro ao processar arquivo de Cantos: {e}")
         return []
 
-# --- LÓGICA DO SCRIPT 2: GOLS ---
+# --- LÓGICA DO SCRIPT 2: GOLS (CORRIGIDA SEPARAÇÃO E VAZIOS) ---
 def processar_gols(file):
     try:
-        df_raw = pd.read_csv(file, sep=';' if ';' in pd.read_csv(file, nrows=1).columns[0] else ',', encoding='latin-1')
-        df_raw.columns = [c.strip() for c in df_raw.columns]
+        try:
+            df_raw = pd.read_csv(file, sep=None, engine='python', encoding='latin-1')
+        except Exception:
+            file.seek(0)
+            df_raw = pd.read_csv(file, sep=';', encoding='latin-1')
+
+        if df_raw.empty or len(df_raw.columns) < 10:
+            st.warning("⚠️ O arquivo de Gols enviado está vazio ou num formato incompatível.")
+            return []
+
+        df_raw.columns = [str(c).strip() for c in df_raw.columns]
 
         cols_tecnicas = list(range(9, min(33, len(df_raw.columns))))
         for col_idx in cols_tecnicas:
@@ -292,7 +301,7 @@ st.sidebar.title("⚽ Robô Pro de Futebol")
 aba = st.sidebar.radio("Navegação", ["1. Análise de Arquivos", "2. Gerenciar Entradas (Green/Red)", "3. Dashboard Financeiro"])
 
 # ---------------------------------------------------------
-# ABA 1: UPLOAD E PROCESSAMENTO DE DADOS (SEM TRAVA DE ARQUIVO)
+# ABA 1: UPLOAD E PROCESSAMENTO DE DADOS
 # ---------------------------------------------------------
 if aba == "1. Análise de Arquivos":
     st.header("📥 Upload dos Arquivos PackBall")
@@ -387,11 +396,4 @@ elif aba == "2. Gerenciar Entradas (Green/Red)":
 
                     if st.button("⚪ Anulada", key=f"null_{row['id']}", use_container_width=True):
                         c = conn.cursor()
-                        c.execute("UPDATE entradas SET status = 'Anulada', odd_comprada = ?, valor_apostado = ?, lucro_prejuizo = 0 WHERE id = ?",
-                                  (odd_comprada, valor_apostado, row['id']))
-                        conn.commit()
-                        st.rerun()
-    conn.close()
-
-# ---------------------------------------------------------
-# ABA 3: DASHBOARD FINANCEIR
+                        c.execute("UPDATE entradas SET status = 'Anulada', odd_comprada = ?, valor_apostado = ?, lucro_pr
