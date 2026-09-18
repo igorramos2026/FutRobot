@@ -114,7 +114,7 @@ def processar_cantos(file):
         st.error(f"Erro ao processar arquivo de Cantos: {e}")
         return []
 
-# --- LÓGICA DO SCRIPT 2: GOLS (CORRIGIDA SEPARAÇÃO E VAZIOS) ---
+# --- LÓGICA DO SCRIPT 2: GOLS ---
 def processar_gols(file):
     try:
         try:
@@ -321,36 +321,40 @@ if aba == "1. Análise de Arquivos":
         if f_cantos:
             res = processar_cantos(f_cantos)
             todas_oportunidades.extend(res)
-            st.success(f"Cantos: {len(res)} oportunidades.")
 
         if f_gols:
             res = processar_gols(f_gols)
             todas_oportunidades.extend(res)
-            st.success(f"Gols: {len(res)} oportunidades.")
 
         if f_win and f_conf:
             res = processar_vitoria(f_win, f_conf)
             todas_oportunidades.extend(res)
-            st.success(f"Vitória (Back): {len(res)} oportunidades.")
 
         if todas_oportunidades:
-            st.subheader("📋 Recomendações Unificadas do Dia")
-            df_res = pd.DataFrame(todas_oportunidades)
-            st.dataframe(df_res, use_container_width=True)
-
-            if st.button("💾 Enviar Oportunidades para Gestão de Banca"):
-                conn = sqlite3.connect("oportunidades.db")
-                c = conn.cursor()
-                for item in todas_oportunidades:
-                    c.execute("""
-                        INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, odd_sugerida)
-                        VALUES (DATE('now'), ?, ?, ?, ?, ?, ?)
-                    """, (item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['odd']))
-                conn.commit()
-                conn.close()
-                st.success("Oportunidades salvas com sucesso na aba de gerenciamento!")
+            st.session_state['oportunidades_temp'] = todas_oportunidades
+            st.success(f"Foram encontradas {len(todas_oportunidades)} oportunidades no total!")
         else:
-            st.warning("Nenhuma oportunidade encontrada ou nenhum arquivo enviado.")
+            st.session_state['oportunidades_temp'] = []
+            st.warning("Nenhuma oportunidade encontrada com os critérios definidos.")
+
+    # Exibe a tabela e o botão de salvamento se houver resultados salvos na sessão
+    if 'oportunidades_temp' in st.session_state and st.session_state['oportunidades_temp']:
+        st.subheader("📋 Recomendações Unificadas do Dia")
+        df_res = pd.DataFrame(st.session_state['oportunidades_temp'])
+        st.dataframe(df_res, use_container_width=True)
+
+        if st.button("💾 Enviar Oportunidades para Gestão de Banca", use_container_width=True):
+            conn = sqlite3.connect("oportunidades.db")
+            c = conn.cursor()
+            for item in st.session_state['oportunidades_temp']:
+                c.execute("""
+                    INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, odd_sugerida)
+                    VALUES (DATE('now'), ?, ?, ?, ?, ?, ?)
+                """, (item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['odd']))
+            conn.commit()
+            conn.close()
+            st.session_state['oportunidades_temp'] = []
+            st.success("✅ Oportunidades enviadas com sucesso! Acesse a aba '2. Gerenciar Entradas' no menu lateral para acompanhar.")
 
 # ---------------------------------------------------------
 # ABA 2: MARCAR ODD, STAKE, GREEN E RED
@@ -398,3 +402,45 @@ elif aba == "2. Gerenciar Entradas (Green/Red)":
                         conn.commit()
                         st.rerun()
     conn.close()
+
+# ---------------------------------------------------------
+# ABA 3: DASHBOARD FINANCEIRO & PERFORMANCE
+# ---------------------------------------------------------
+elif aba == "3. Dashboard Financeiro":
+    st.header("📊 Painel de Desempenho Financeiro")
+
+    conn = sqlite3.connect("oportunidades.db")
+    df_hist = pd.read_sql_query("SELECT * FROM entradas WHERE status != 'Pendente'", conn)
+    conn.close()
+
+    if df_hist.empty:
+        st.info("Nenhuma aposta finalizada no histórico para gerar métricas.")
+    else:
+        total_apostas = len(df_hist[df_hist['status'].isin(['Green', 'Red'])])
+        greens = len(df_hist[df_hist['status'] == 'Green'])
+        reds = len(df_hist[df_hist['status'] == 'Red'])
+        winrate = (greens / total_apostas * 100) if total_apostas > 0 else 0
+
+        total_investido = df_hist['valor_apostado'].sum()
+        lucro_total = df_hist['lucro_prejuizo'].sum()
+        roi = (lucro_total / total_investido * 100) if total_investido > 0 else 0
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Entradas Finalizadas", total_apostas)
+        c2.metric("🟢 Greens / 🔴 Reds", f"{greens} / {reds}")
+        c3.metric("Assertividade", f"{winrate:.1f}%")
+        c4.metric("Total Investido", f"R$ {total_investido:.2f}")
+        c5.metric("Lucro Líquido", f"R$ {lucro_total:.2f}", delta=f"{roi:.1f}% ROI")
+
+        st.divider()
+        st.subheader("📈 Performance Detalhada por Estratégia")
+        performance_script = df_hist.groupby('script_origem').agg(
+            Apostas=('id', 'count'),
+            Investimento=('valor_apostado', 'sum'),
+            Lucro_R$=('lucro_prejuizo', 'sum')
+        ).reset_index()
+
+        st.dataframe(performance_script, use_container_width=True)
+
+        st.subheader("📋 Histórico Completo de Entradas")
+        st.dataframe(df_hist[['data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']], use_container_width=True)
