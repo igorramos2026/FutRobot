@@ -337,7 +337,6 @@ if aba == "1. Análise de Arquivos":
             st.session_state['oportunidades_temp'] = []
             st.warning("Nenhuma oportunidade encontrada com os critérios definidos.")
 
-    # Exibe a tabela e o botão de salvamento se houver resultados salvos na sessão
     if 'oportunidades_temp' in st.session_state and st.session_state['oportunidades_temp']:
         st.subheader("📋 Recomendações Unificadas do Dia")
         df_res = pd.DataFrame(st.session_state['oportunidades_temp'])
@@ -437,7 +436,7 @@ elif aba == "3. Dashboard Financeiro":
         performance_script = df_hist.groupby('script_origem').agg(
             Apostas=('id', 'count'),
             Investimento=('valor_apostado', 'sum'),
-            Lucro_R$=('lucro_prejuizo', 'sum')
+            Lucro_R=('lucro_prejuizo', 'sum')
         ).reset_index()
 
         st.dataframe(performance_script, use_container_width=True)
