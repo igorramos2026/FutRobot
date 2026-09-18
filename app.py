@@ -292,7 +292,7 @@ st.sidebar.title("⚽ Robô Pro de Futebol")
 aba = st.sidebar.radio("Navegação", ["1. Análise de Arquivos", "2. Gerenciar Entradas (Green/Red)", "3. Dashboard Financeiro"])
 
 # ---------------------------------------------------------
-# ABA 1: UPLOAD E PROCESSAMENTO DE DADOS
+# ABA 1: UPLOAD E PROCESSAMENTO DE DADOS (SEM TRAVA DE ARQUIVO)
 # ---------------------------------------------------------
 if aba == "1. Análise de Arquivos":
     st.header("📥 Upload dos Arquivos PackBall")
@@ -300,11 +300,11 @@ if aba == "1. Análise de Arquivos":
 
     c1, c2 = st.columns(2)
     with c1:
-        f_cantos = st.file_uploader("Arquivo de Cantos (CSV)", type=["csv"], key="cantos")
-        f_gols = st.file_uploader("Arquivo de Over Gols (CSV)", type=["csv"], key="gols")
+        f_cantos = st.file_uploader("Arquivo de Cantos", key="cantos")
+        f_gols = st.file_uploader("Arquivo de Over Gols", key="gols")
     with c2:
-        f_win = st.file_uploader("Arquivo Back Win (CSV)", type=["csv"], key="win")
-        f_conf = st.file_uploader("Arquivo Back Confronto H2H (CSV)", type=["csv"], key="conf")
+        f_win = st.file_uploader("Arquivo Back Win", key="win")
+        f_conf = st.file_uploader("Arquivo Back Confronto H2H", key="conf")
 
     if st.button("🚀 Processar Oportunidades", use_container_width=True):
         todas_oportunidades = []
@@ -393,4 +393,5 @@ elif aba == "2. Gerenciar Entradas (Green/Red)":
                         st.rerun()
     conn.close()
 
-# -----------------------------
+# ---------------------------------------------------------
+# ABA 3: DASHBOARD FINANCEIR
