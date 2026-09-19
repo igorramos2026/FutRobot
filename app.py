@@ -353,10 +353,11 @@ if aba == "1. Análise de Arquivos":
         if st.button("💾 Enviar Oportunidades para Gestão de Banca", use_container_width=True):
             conn = sqlite3.connect("oportunidades.db")
             c = conn.cursor()
+            data_hoje = date.today().isoformat()
             for item in st.session_state['oportunidades_temp']:
                 c.execute(
-                    "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, odd_sugerida) VALUES (DATE('now'), ?, ?, ?, ?, ?, ?)",
-                    (item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['odd'])
+                    "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, odd_sugerida, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendente')",
+                    (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['odd'])
                 )
             conn.commit()
             conn.close()
@@ -371,7 +372,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
     st.write("Confirme o valor e odd apostados para enviar para **Apostas em Andamento**, ou exclua se não for realizar.")
 
     conn = sqlite3.connect("oportunidades.db")
-    df_entradas = pd.read_sql_query("SELECT * FROM entradas WHERE status = 'Pendente' ORDER BY script_origem ASC, hora ASC", conn)
+    df_entradas = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'pendente' ORDER BY script_origem ASC, hora ASC", conn)
 
     if df_entradas.empty:
         st.info("Nenhuma sugestão pendente no momento!")
@@ -398,6 +399,4 @@ elif aba == "2. Gerenciar Entradas (Novas)":
                             st.toast("Aposta enviada para Apostas em Andamento!")
                             st.rerun()
 
-                        if st.button("🗑️ Descartar", key=f"del_{row['id']}", use_container_width=True):
-                            c = conn.cursor()
-                       
+                        if st.button("🗑️ Descartar", key=f"del_{row['id']}", use_container
