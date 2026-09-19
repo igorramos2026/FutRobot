@@ -388,15 +388,16 @@ elif aba == "2. Gerenciar Entradas (Novas)":
                         st.write(f"**Odd Sugerida:** {row['odd_sugerida']:.2f}")
 
                     with col_inputs:
-                        odd_comprada = st.number_input("Odd Real Comprada:", value=float(row['odd_sugerida']), step=0.01, key=f"odd_{row['id']}")
-                        valor_apostado = st.number_input("Valor Apostado (R$):", value=50.0, step=5.0, key=f"val_{row['id']}")
+                        key_odd = f"odd_{row['id']}"
+                        key_val = f"val_{row['id']}"
+                        odd_comprada = st.number_input("Odd Real Comprada:", value=float(row['odd_sugerida']), step=0.01, key=key_odd)
+                        valor_apostado = st.number_input("Valor Apostado (R$):", value=50.0, step=5.0, key=key_val)
 
                     with col_botoes:
-                        if st.button("📌 Confirmar Aposta", key=f"conf_{row['id']}", use_container_width=True):
+                        key_conf = f"conf_{row['id']}"
+                        key_del = f"del_{row['id']}"
+                        
+                        btn_confirmar = st.button("📌 Confirmar Aposta", key=key_conf, use_container_width=True)
+                        if btn_confirmar:
                             c = conn.cursor()
-                            c.execute("UPDATE entradas SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? WHERE id = ?", (odd_comprada, valor_apostado, row['id']))
-                            conn.commit()
-                            st.toast("Aposta enviada para Apostas em Andamento!")
-                            st.rerun()
-
-                        if st.button("🗑️ Descartar", key=f"del_{row['id']}", use_container
+                            c.execute("UPDATE entradas SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? WHERE id = ?", (odd_comprada, valor_apostado, row['id
