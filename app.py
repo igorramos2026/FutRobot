@@ -400,4 +400,9 @@ elif aba == "2. Gerenciar Entradas (Novas)":
                         btn_confirmar = st.button("📌 Confirmar Aposta", key=key_conf, use_container_width=True)
                         if btn_confirmar:
                             c = conn.cursor()
-                            c.execute("UPDATE entradas SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? WHERE id = ?", (odd_comprada, valor_apostado, row['id
+                            query = """
+    UPDATE entradas 
+    SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? 
+    WHERE id = ?
+"""
+c.execute(query, (odd_comprada, valor_apostado, row['id']))
