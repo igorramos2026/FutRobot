@@ -378,7 +378,6 @@ elif aba == "2. Gerenciar Entradas (Novas)":
         st.info("Nenhuma sugestão pendente no momento!")
     else:
         for estrategia, grupo in df_entradas.groupby('script_origem'):
-            # Agrupamento sanfonado (Expander) por Estratégia
             with st.expander(f"📁 {estrategia} ({len(grupo)} oportunidades)", expanded=False):
                 for idx, row in grupo.iterrows():
                     st.markdown(f"##### ⏰ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
@@ -401,4 +400,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
                                 WHERE id = ?
                             """, (odd_comprada, valor_apostado, row['id']))
                             conn.commit()
-                            st.toast(f"Aposta em {row['jogo']} enviada para 'Apostas em Andamento
+                            st.toast("Aposta enviada para Apostas em Andamento!")
+                            st.rerun()
+
+                        if st.button(
