@@ -96,7 +96,6 @@ def processar_cantos(file):
         df['APPM_Total'] = (df['APPM_Home'] + df['APPM_Away']).round(2)
 
         df_base = df[(df['Sample_Home'] >= 10) & (df['Sample_Away'] >= 10) & (df['Odds_Over_95'] > 1.0)].copy()
-
         df_main = df_base[(df_base['Expectativa_Cruzada'] >= 11.50) & (df_base['APPM_Total'] >= 1.00)].copy()
         
         resultados = []
@@ -355,10 +354,10 @@ if aba == "1. Análise de Arquivos":
             conn = sqlite3.connect("oportunidades.db")
             c = conn.cursor()
             for item in st.session_state['oportunidades_temp']:
-                c.execute("""
-                    INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, odd_sugerida)
-                    VALUES (DATE('now'), ?, ?, ?, ?, ?, ?)
-                """, (item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['odd']))
+                c.execute(
+                    "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, odd_sugerida) VALUES (DATE('now'), ?, ?, ?, ?, ?, ?)",
+                    (item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['odd'])
+                )
             conn.commit()
             conn.close()
             st.session_state['oportunidades_temp'] = []
@@ -394,13 +393,11 @@ elif aba == "2. Gerenciar Entradas (Novas)":
                     with col_botoes:
                         if st.button("📌 Confirmar Aposta", key=f"conf_{row['id']}", use_container_width=True):
                             c = conn.cursor()
-                            c.execute("""
-                                UPDATE entradas 
-                                SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? 
-                                WHERE id = ?
-                            """, (odd_comprada, valor_apostado, row['id']))
+                            c.execute("UPDATE entradas SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? WHERE id = ?", (odd_comprada, valor_apostado, row['id']))
                             conn.commit()
                             st.toast("Aposta enviada para Apostas em Andamento!")
                             st.rerun()
 
-                        if st.button(
+                        if st.button("🗑️ Descartar", key=f"del_{row['id']}", use_container_width=True):
+                            c = conn.cursor()
+                       
