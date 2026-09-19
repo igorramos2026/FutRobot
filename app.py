@@ -354,18 +354,16 @@ if aba == "1. Análise de Arquivos":
             conn = sqlite3.connect("oportunidades.db")
             c = conn.cursor()
             data_hoje = date.today().isoformat()
+            sql_insert = "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, odd_sugerida, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendente')"
             for item in st.session_state['oportunidades_temp']:
-                c.execute(
-                    "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, odd_sugerida, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendente')",
-                    (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['odd'])
-                )
+                c.execute(sql_insert, (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['odd']))
             conn.commit()
             conn.close()
             st.session_state['oportunidades_temp'] = []
             st.success("✅ Oportunidades enviadas com sucesso! Acesse a aba '2. Gerenciar Entradas' para acompanhar.")
 
 # ---------------------------------------------------------
-# ABA 2: GERENCIAR ENTRADAS NOVAS (CONFIRMAR OU DESCHARTAR)
+# ABA 2: GERENCIAR ENTRADAS NOVAS (CONFIRMAR OU DESCARTAR)
 # ---------------------------------------------------------
 elif aba == "2. Gerenciar Entradas (Novas)":
     st.header("🎯 Sugestões Pendentes por Estratégia")
@@ -400,9 +398,224 @@ elif aba == "2. Gerenciar Entradas (Novas)":
                         btn_confirmar = st.button("📌 Confirmar Aposta", key=key_conf, use_container_width=True)
                         if btn_confirmar:
                             c = conn.cursor()
-                            query = """
-    UPDATE entradas 
-    SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? 
-    WHERE id = ?
-"""
-c.execute(query, (odd_comprada, valor_apostado, row['id']))
+                            sql_update = "UPDATE entradas SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? WHERE id = ?"
+                            c.execute(sql_update, (odd_comprada, valor_apostado, row['id']))
+                            conn.commit()
+                            st.toast("Aposta enviada para Apostas em Andamento!")
+                            st.rerun()
+
+                        btn_descartar = st.button("🗑️ Descartar", key=key_del, use_container_width=True)
+                        if btn_descartar:
+                            c = conn.cursor()
+                            sql_delete = "DELETE FROM entradas WHERE id = ?"
+                            c.execute(sql_delete, (row['id'],))
+                            conn.commit()
+                            st.toast("Entrada descartada!")
+                            st.rerun()
+                    st.divider()
+    conn.close()
+
+# ---------------------------------------------------------
+# ABA 3: APOSTAS EM ANDAMENTO (AGUARDANDO GREEN/RED)
+# ---------------------------------------------------------
+elif aba == "3. Apostas em Andamento":
+    st.header("⏳ Apostas Confirmadas (Aguardando Resultado)")
+
+    conn = sqlite3.connect("oportunidades.db")
+    df_andamento = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'em andamento' ORDER BY script_origem ASC, hora ASC", conn)
+
+    if df_andamento.empty:
+        st.info("Nenhuma aposta em andamento no momento!")
+    else:
+        for estrategia, grupo in df_andamento.groupby('script_origem'):
+            with st.expander(f"📁 {estrategia} ({len(grupo)} apostas ativas)", expanded=True):
+                for idx, row in grupo.iterrows():
+                    st.markdown(f"##### ⚽ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
+                    col_info, col_botoes = st.columns([3, 2])
+
+                    with col_info:
+                        st.write(f"**Liga:** {row['liga']}")
+                        st.write(f"**Valor Apostado:** R$ {row['valor_apostado']:.2f} | **Odd Comprada:** {row['odd_comprada']:.2f}")
+
+                    with col_botoes:
+                        key_green = f"green_and_{row['id']}"
+                        key_red = f"red_and_{row['id']}"
+                        key_null = f"null_and_{row['id']}"
+
+                        btn_green = st.button("🟢 Green", key=key_green, use_container_width=True)
+                        if btn_green:
+                            lucro = (row['odd_comprada'] - 1) * row['valor_apostado']
+                            c = conn.cursor()
+                            sql_g = "UPDATE entradas SET status = 'Green', lucro_prejuizo = ? WHERE id = ?"
+                            c.execute(sql_g, (lucro, row['id']))
+                            conn.commit()
+                            st.toast(f"Green registrado com sucesso! (+R$ {lucro:.2f})")
+                            st.rerun()
+
+                        btn_red = st.button("🔴 Red", key=key_red, use_container_width=True)
+                        if btn_red:
+                            prejuizo = -row['valor_apostado']
+                            c = conn.cursor()
+                            sql_r = "UPDATE entradas SET status = 'Red', lucro_prejuizo = ? WHERE id = ?"
+                            c.execute(sql_r, (prejuizo, row['id']))
+                            conn.commit()
+                            st.toast(f"Red registrado. (-R$ {row['valor_apostado']:.2f})")
+                            st.rerun()
+
+                        btn_null = st.button("⚪ Anular / Reembolso", key=key_null, use_container_width=True)
+                        if btn_null:
+                            c = conn.cursor()
+                            sql_n = "UPDATE entradas SET status = 'Anulada', lucro_prejuizo = 0 WHERE id = ?"
+                            c.execute(sql_n, (row['id'],))
+                            conn.commit()
+                            st.toast("Entrada Anulada!")
+                            st.rerun()
+                    st.divider()
+    conn.close()
+
+# ---------------------------------------------------------
+# ABA 4: DASHBOARD FINANCEIRO & PERFORMANCE COM FILTROS DE DATA
+# ---------------------------------------------------------
+elif aba == "4. Dashboard Financeiro":
+    st.header("📊 Painel de Desempenho Financeiro")
+
+    conn = sqlite3.connect("oportunidades.db")
+    df_hist = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) IN ('green', 'red', 'anulada')", conn)
+
+    if df_hist.empty:
+        st.info("Nenhuma aposta finalizada no histórico para gerar métricas.")
+        conn.close()
+    else:
+        st.subheader("🔍 Filtros de Análise")
+        f1, f2 = st.columns(2)
+
+        with f1:
+            opcao_data = st.selectbox("Período:", ["Hoje", "Últimos 7 dias", "Mês Atual", "Todo o Histórico", "Personalizado"])
+            hoje = date.today()
+
+            if opcao_data == "Hoje":
+                d_inicio, d_fim = hoje, hoje
+            elif opcao_data == "Últimos 7 dias":
+                d_inicio, d_fim = hoje - pd.Timedelta(days=7), hoje
+            elif opcao_data == "Mês Atual":
+                d_inicio, d_fim = date(hoje.year, hoje.month, 1), hoje
+            elif opcao_data == "Todo o Histórico":
+                d_inicio, d_fim = date(2020, 1, 1), hoje
+            else:
+                d_inicio = st.date_input("Data Inicial:", hoje)
+                d_fim = st.date_input("Data Final:", hoje)
+
+        with f2:
+            estrategias_disponiveis = ["Todas as Estratégias"] + list(df_hist['script_origem'].unique())
+            est_selecionada = st.selectbox("Estratégia:", estrategias_disponiveis)
+
+        df_hist['data_registro'] = df_hist['data_registro'].fillna(hoje.isoformat())
+        df_hist['data_dt'] = pd.to_datetime(df_hist['data_registro'], errors='coerce').dt.date
+        df_hist['data_dt'] = df_hist['data_dt'].fillna(hoje)
+
+        mask_data = (df_hist['data_dt'] >= d_inicio) & (df_hist['data_dt'] <= d_fim)
+        df_filtrado = df_hist[mask_data].copy()
+
+        if est_selecionada != "Todas as Estratégias":
+            df_filtrado = df_filtrado[df_filtrado['script_origem'] == est_selecionada].copy()
+
+        st.divider()
+
+        if df_filtrado.empty:
+            st.warning("Nenhum resultado registrado para o período ou estratégia selecionada.")
+        else:
+            total_apostas = len(df_filtrado[df_filtrado['status'].str.strip().str.title().isin(['Green', 'Red'])])
+            greens = len(df_filtrado[df_filtrado['status'].str.strip().str.title() == 'Green'])
+            reds = len(df_filtrado[df_filtrado['status'].str.strip().str.title() == 'Red'])
+            winrate = (greens / total_apostas * 100) if total_apostas > 0 else 0
+
+            total_investido = df_filtrado['valor_apostado'].sum()
+            lucro_total = df_filtrado['lucro_prejuizo'].sum()
+            roi = (lucro_total / total_investido * 100) if total_investido > 0 else 0
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Entradas Finalizadas", total_apostas)
+            c2.metric("🟢 Greens / 🔴 Reds", f"{greens} / {reds}")
+            c3.metric("Assertividade", f"{winrate:.1f}%")
+            c4.metric("Total Investido", f"R$ {total_investido:.2f}")
+            c5.metric("Lucro Líquido", f"R$ {lucro_total:.2f}", delta=f"{roi:.1f}% ROI")
+
+            st.divider()
+
+            st.subheader("📈 Evolução Financeira do Período")
+            df_chart = df_filtrado.groupby('data_registro')['lucro_prejuizo'].sum().reset_index()
+            df_chart['Lucro_Acumulado'] = df_chart['lucro_prejuizo'].cumsum()
+            st.line_chart(df_chart.set_index('data_registro')['Lucro_Acumulado'])
+
+            st.divider()
+
+            st.subheader("📊 Performance Comparativa das Estratégias no Período")
+            perf_list = []
+            for script, group in df_filtrado.groupby('script_origem'):
+                tot = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
+                g = len(group[group['status'].str.strip().str.title() == 'Green'])
+                r = len(group[group['status'].str.strip().str.title() == 'Red'])
+                wr = (g / tot * 100) if tot > 0 else 0
+                inv = group['valor_apostado'].sum()
+                luc = group['lucro_prejuizo'].sum()
+                roi_script = (luc / inv * 100) if inv > 0 else 0
+                perf_list.append({
+                    'Estratégia': script,
+                    'Entradas': tot,
+                    'Greens': g,
+                    'Reds': r,
+                    'Assertividade (%)': f"{wr:.1f}%",
+                    'Investimento (R$)': f"R$ {inv:.2f}",
+                    'Lucro Líquido (R$)': f"R$ {luc:.2f}",
+                    'ROI (%)': f"{roi_script:.1f}%"
+                })
+            st.dataframe(pd.DataFrame(perf_list), use_container_width=True)
+
+            st.divider()
+
+            with st.expander("🛠️ Corrigir ou Excluir uma Entrada Registrada"):
+                st.write("Caso tenha marcado um Green, Red, Stake ou Odd errado, selecione o registro abaixo para editar:")
+                
+                opcoes_editar = {
+                    f"ID {r['id']} | {r['data_registro']} - {r['jogo']} [{r['script_origem']}] - Status: {r['status']}": r['id'] 
+                    for _, r in df_filtrado.iterrows()
+                }
+                
+                sel_label = st.selectbox("Selecione a Aposta para Editar:", list(opcoes_editar.keys()))
+                id_selecionado = opcoes_editar[sel_label]
+                row_edit = df_filtrado[df_filtrado['id'] == id_selecionado].iloc[0]
+
+                ec1, ec2, ec3, ec4 = st.columns(4)
+                novo_status = ec1.selectbox("Novo Status:", ["Green", "Red", "Anulada"], index=["Green", "Red", "Anulada"].index(row_edit['status']) if row_edit['status'] in ["Green", "Red", "Anulada"] else 0)
+                nova_odd = ec2.number_input("Nova Odd Comprada:", value=float(row_edit['odd_comprada']), step=0.01)
+                novo_valor = ec3.number_input("Novo Valor Apostado (R$):", value=float(row_edit['valor_apostado']), step=5.0)
+
+                btn_salvar = ec4.button("💾 Salvar Alterações", use_container_width=True)
+                btn_deletar_hist = ec4.button("🗑️ Deletar Registro", use_container_width=True)
+
+                if btn_salvar:
+                    if novo_status == "Green":
+                        novo_lucro = (nova_odd - 1) * novo_valor
+                    elif novo_status == "Red":
+                        novo_lucro = -novo_valor
+                    else:
+                        novo_lucro = 0.0
+
+                    c = conn.cursor()
+                    sql_edit = "UPDATE entradas SET status = ?, odd_comprada = ?, valor_apostado = ?, lucro_prejuizo = ? WHERE id = ?"
+                    c.execute(sql_edit, (novo_status, nova_odd, novo_valor, novo_lucro, id_selecionado))
+                    conn.commit()
+                    st.success("✅ Aposta atualizada com sucesso!")
+                    st.rerun()
+
+                if btn_deletar_hist:
+                    c = conn.cursor()
+                    sql_del_hist = "DELETE FROM entradas WHERE id = ?"
+                    c.execute(sql_del_hist, (id_selecionado,))
+                    conn.commit()
+                    st.success("🗑️ Aposta removida do histórico!")
+                    st.rerun()
+
+            st.subheader("📋 Histórico Detalhado do Período Selecionado")
+            st.dataframe(df_filtrado[['id', 'data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']], use_container_width=True)
+        conn.close()
