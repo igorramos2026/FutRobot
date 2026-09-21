@@ -542,14 +542,58 @@ elif aba == "4. Dashboard Financeiro":
 
             st.divider()
 
-            st.subheader("📈 Evolução Financeira do Período")
+            st.subheader("📈 Evolução Financeira Acumulada")
             df_chart = df_filtrado.groupby('data_registro')['lucro_prejuizo'].sum().reset_index()
             df_chart['Lucro_Acumulado'] = df_chart['lucro_prejuizo'].cumsum()
             st.line_chart(df_chart.set_index('data_registro')['Lucro_Acumulado'])
 
             st.divider()
 
-            st.subheader("📊 Performance Comparativa das Estratégias no Período")
+            # --- NOVA SEÇÃO: DETALHAMENTO DIÁRIO GERAL ---
+            st.subheader("📅 Desempenho Detalhado por Dia")
+            
+            diario_list = []
+            for dt, group in df_filtrado.groupby('data_registro', sort=False):
+                tot_d = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
+                g_d = len(group[group['status'].str.strip().str.title() == 'Green'])
+                r_d = len(group[group['status'].str.strip().str.title() == 'Red'])
+                wr_d = (g_d / tot_d * 100) if tot_d > 0 else 0
+                inv_d = group['valor_apostado'].sum()
+                luc_d = group['lucro_prejuizo'].sum()
+                
+                diario_list.append({
+                    'Data': dt,
+                    'Apostas': tot_d,
+                    'Greens': g_d,
+                    'Reds': r_d,
+                    'Assertividade (%)': f"{wr_d:.1f}%",
+                    'Investido (R$)': f"R$ {inv_d:.2f}",
+                    'Lucro do Dia (R$)': f"R$ {luc_d:.2f}"
+                })
+            
+            st.dataframe(pd.DataFrame(diario_list), use_container_width=True)
+
+            st.divider()
+
+            # --- NOVA SEÇÃO: DETALHAMENTO DIÁRIO POR PROJETO / ESTRATÉGIA ---
+            st.subheader("📁 Resultado Diário por Projeto / Estratégia")
+            
+            # Tabela dinânica pivotada (Linha = Data, Colunas = Estratégia, Valores = Lucro)
+            pivot_lucro = df_filtrado.pivot_table(
+                index='data_registro', 
+                columns='script_origem', 
+                values='lucro_prejuizo', 
+                aggfunc='sum', 
+                fill_value=0.0
+            )
+            
+            # Formatar os valores da tabela com 'R$'
+            pivot_formated = pivot_lucro.applymap(lambda x: f"R$ {x:.2f}")
+            st.dataframe(pivot_formated, use_container_width=True)
+
+            st.divider()
+
+            st.subheader("📊 Performance Comparativa Global das Estratégias")
             perf_list = []
             for script, group in df_filtrado.groupby('script_origem'):
                 tot = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
