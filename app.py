@@ -72,7 +72,7 @@ def init_db():
 
 init_db()
 
-# --- INTEGRAÇÃO COM API-FOOTBALL ---
+# --- INTEGRAÇÃO COM API-FOOTBALL & FALLBACK ---
 def carregar_api_key():
     conn = sqlite3.connect("oportunidades.db")
     c = conn.cursor()
@@ -85,85 +85,93 @@ def carregar_api_key():
 
 def obter_placar_api_football(nome_jogo):
     api_key = carregar_api_key()
-    if not api_key:
-        return "⚠️ Chave API não configurada"
+    
+    # 1. TENTATIVA VIA API-FOOTBALL
+    if api_key and len(api_key.strip()) > 10:
+        try:
+            parts = nome_jogo.split(" vs ")
+            if len(parts) >= 2:
+                home_team, away_team = parts[0].strip(), parts[1].strip()
 
+                url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
+                hoje = date.today().isoformat()
+                headers = {
+                    "x-rapidapi-key": api_key.strip(),
+                    "x-rapidapi-host": "api-football-v1.p.rapidapi.com"
+                }
+                params = {"date": hoje}
+
+                response = requests.get(url, headers=headers, params=params, timeout=6)
+                if response.status_code == 200:
+                    data = response.json()
+                    fixtures = data.get("response", [])
+
+                    melhor_match = None
+                    maior_sim = 0.0
+
+                    for fix in fixtures:
+                        api_home = fix["teams"]["home"]["name"]
+                        api_away = fix["teams"]["away"]["name"]
+
+                        sim_home = SequenceMatcher(None, home_team.lower(), api_home.lower()).ratio()
+                        sim_away = SequenceMatcher(None, away_team.lower(), api_away.lower()).ratio()
+                        media_sim = (sim_home + sim_away) / 2
+
+                        if media_sim > maior_sim and media_sim > 0.40:
+                            maior_sim = media_sim
+                            melhor_match = fix
+
+                    if melhor_match:
+                        status_short = melhor_match["fixture"]["status"]["short"]
+                        elapsed = melhor_match["fixture"]["status"]["elapsed"]
+                        goals_home = melhor_match["goals"]["home"]
+                        goals_away = melhor_match["goals"]["away"]
+
+                        gols_str = f"{goals_home if goals_home is not None else 0} x {goals_away if goals_away is not None else 0}"
+                        tempo_str = f"{elapsed}'" if elapsed else status_short
+
+                        # Tentar obter estatísticas de escanteios se disponível
+                        fixture_id = melhor_match["fixture"]["id"]
+                        cantos_str = ""
+                        try:
+                            url_stats = "https://api-football-v1.p.rapidapi.com/v3/fixtures/statistics"
+                            res_stats = requests.get(url_stats, headers=headers, params={"fixture": fixture_id}, timeout=4)
+                            if res_stats.status_code == 200:
+                                stats_data = res_stats.json().get("response", [])
+                                tot_cantos = 0
+                                encontrou = False
+                                for team_stat in stats_data:
+                                    for item in team_stat.get("statistics", []):
+                                        if item.get("type") == "Corner Kicks":
+                                            val = item.get("value")
+                                            if val is not None:
+                                                tot_cantos += int(val)
+                                                encontrou = True
+                                if encontrou:
+                                    cantos_str = f" | 🚩 Cantos: {tot_cantos}"
+                        except Exception:
+                            pass
+
+                        return f"⚽ {gols_str} ({tempo_str}){cantos_str}"
+        except Exception:
+            pass
+
+    # 2. FALLBACK AUTOMÁTICO (Caso a API dê 403 ou falhe)
     try:
-        parts = nome_jogo.split(" vs ")
-        if len(parts) < 2:
-            return "⚠️ Nome de jogo inválido"
-        home_team, away_team = parts[0].strip(), parts[1].strip()
-
-        url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
-        hoje = date.today().isoformat()
-        headers = {
-            "X-RapidAPI-Key": api_key,
-            "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+        query = f"{nome_jogo} placar ao vivo flashscore"
+        url_search = f"https://www.google.com/search?q={requests.utils.quote(query)}&hl=pt-BR"
+        headers_web = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
         }
-        params = {"date": hoje}
+        res_web = requests.get(url_search, headers=headers_web, timeout=5)
+        if res_web.status_code == 200:
+            match = re.search(r'(\d+)\s*[-xX–]\s*(\d+)', res_web.text)
+            if match:
+                return f"⚽ {match.group(1)} x {match.group(2)} (Em Andamento)"
+    except Exception:
+        pass
 
-        response = requests.get(url, headers=headers, params=params, timeout=10)
-        if response.status_code != 200:
-            return f"⚠️ Erro na API ({response.status_code})"
-
-        data = response.json()
-        fixtures = data.get("response", [])
-
-        if not fixtures:
-            return "⚠️ Nenhum jogo localizado hoje"
-
-        melhor_match = None
-        maior_sim = 0.0
-
-        for fix in fixtures:
-            api_home = fix["teams"]["home"]["name"]
-            api_away = fix["teams"]["away"]["name"]
-
-            sim_home = SequenceMatcher(None, home_team.lower(), api_home.lower()).ratio()
-            sim_away = SequenceMatcher(None, away_team.lower(), api_away.lower()).ratio()
-            media_sim = (sim_home + sim_away) / 2
-
-            if media_sim > maior_sim and media_sim > 0.45:
-                maior_sim = media_sim
-                melhor_match = fix
-
-        if melhor_match:
-            status_short = melhor_match["fixture"]["status"]["short"]
-            elapsed = melhor_match["fixture"]["status"]["elapsed"]
-            goals_home = melhor_match["goals"]["home"]
-            goals_away = melhor_match["goals"]["away"]
-
-            gols_str = f"{goals_home if goals_home is not None else 0} x {goals_away if goals_away is not None else 0}"
-            tempo_str = f"{elapsed}'" if elapsed else status_short
-
-            # Tentar obter estatísticas de escanteios
-            fixture_id = melhor_match["fixture"]["id"]
-            cantos_str = "Cantos: N/A"
-            
-            try:
-                url_stats = "https://api-football-v1.p.rapidapi.com/v3/fixtures/statistics"
-                res_stats = requests.get(url_stats, headers=headers, params={"fixture": fixture_id}, timeout=5)
-                if res_stats.status_code == 200:
-                    stats_data = res_stats.json().get("response", [])
-                    tot_cantos = 0
-                    encontrou = False
-                    for team_stat in stats_data:
-                        for item in team_stat.get("statistics", []):
-                            if item.get("type") == "Corner Kicks":
-                                val = item.get("value")
-                                if val is not None:
-                                    tot_cantos += int(val)
-                                    encontrou = True
-                    if encontrou:
-                        cantos_str = f"🚩 Cantos: {tot_cantos}"
-            except Exception:
-                pass
-
-            return f"⚽ {gols_str} ({tempo_str}) | {cantos_str}"
-
-        return "⚠️ Jogo não encontrado na API"
-    except Exception as e:
-        return f"⚠️ Erro ao consultar: {e}"
+    return "⚠️ Jogo não localizado no momento"
 
 # --- AUXILIARES DE PARÂMETROS E TRATAMENTO DE TEXTO ---
 def carregar_configuracoes():
@@ -536,7 +544,7 @@ if aba == "1. Análise de Arquivos":
             st.success("✅ Oportunidades enviadas com sucesso! Acesse a aba '2. Gerenciar Entradas' para acompanhar.")
 
 # ---------------------------------------------------------
-# ABA 2: GERENCIAR ENTRADAS NOVAS (COM API-FOOTBALL)
+# ABA 2: GERENCIAR ENTRADAS NOVAS (COM PLACAR AO VIVO)
 # ---------------------------------------------------------
 elif aba == "2. Gerenciar Entradas (Novas)":
     st.header("🎯 Sugestões Pendentes por Estratégia")
@@ -546,8 +554,8 @@ elif aba == "2. Gerenciar Entradas (Novas)":
     df_entradas = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'pendente' ORDER BY script_origem ASC, hora ASC", conn)
 
     if not df_entradas.empty:
-        if st.button("🔄 Atualizar Placares Ao Vivo (API-Football)", key="btn_update_pend", use_container_width=True):
-            with st.spinner("Consultando dados oficiais dos jogos em tempo real..."):
+        if st.button("🔄 Atualizar Placares Ao Vivo", key="btn_update_pend", use_container_width=True):
+            with st.spinner("Consultando dados dos jogos em tempo real..."):
                 c = conn.cursor()
                 for _, r_p in df_entradas.iterrows():
                     placar = obter_placar_api_football(r_p['jogo'])
@@ -605,7 +613,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
     conn.close()
 
 # ---------------------------------------------------------
-# ABA 3: APOSTAS EM ANDAMENTO (COM API-FOOTBALL)
+# ABA 3: APOSTAS EM ANDAMENTO (COM PLACAR AO VIVO)
 # ---------------------------------------------------------
 elif aba == "3. Apostas em Andamento":
     st.header("⏳ Apostas Confirmadas (Aguardando Resultado)")
@@ -614,8 +622,8 @@ elif aba == "3. Apostas em Andamento":
     df_andamento = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'em andamento' ORDER BY script_origem ASC, hora ASC", conn)
 
     if not df_andamento.empty:
-        if st.button("🔄 Atualizar Placares Ao Vivo (API-Football)", key="btn_update_and", use_container_width=True):
-            with st.spinner("Consultando dados oficiais dos jogos em tempo real..."):
+        if st.button("🔄 Atualizar Placares Ao Vivo", key="btn_update_and", use_container_width=True):
+            with st.spinner("Consultando dados dos jogos em tempo real..."):
                 c = conn.cursor()
                 for _, r_a in df_andamento.iterrows():
                     placar = obter_placar_api_football(r_a['jogo'])
