@@ -549,7 +549,7 @@ elif aba == "4. Dashboard Financeiro":
 
             st.divider()
 
-            # --- DETALHAMENTO DIÁRIO GERAL ---
+            # --- DETALHAMENTO DIÁRIO GERAL (COM ROI) ---
             st.subheader("📅 Desempenho Detalhado por Dia")
             
             diario_list = []
@@ -560,6 +560,7 @@ elif aba == "4. Dashboard Financeiro":
                 wr_d = (g_d / tot_d * 100) if tot_d > 0 else 0
                 inv_d = group['valor_apostado'].sum()
                 luc_d = group['lucro_prejuizo'].sum()
+                roi_d = (luc_d / inv_d * 100) if inv_d > 0 else 0.0
                 
                 diario_list.append({
                     'Data': dt,
@@ -568,31 +569,41 @@ elif aba == "4. Dashboard Financeiro":
                     'Reds': r_d,
                     'Assertividade (%)': f"{wr_d:.1f}%",
                     'Investido (R$)': f"R$ {inv_d:.2f}",
-                    'Lucro do Dia (R$)': f"R$ {luc_d:.2f}"
+                    'Lucro do Dia (R$)': f"R$ {luc_d:.2f}",
+                    'ROI (%)': f"{roi_d:.1f}%"
                 })
             
             st.dataframe(pd.DataFrame(diario_list), use_container_width=True)
 
             st.divider()
 
-            # --- DETALHAMENTO DIÁRIO POR PROJETO / ESTRATÉGIA (CORRIGIDO) ---
+            # --- DETALHAMENTO DIÁRIO POR PROJETO / ESTRATÉGIA (COM ROI) ---
             st.subheader("📁 Resultado Diário por Projeto / Estratégia")
             
-            pivot_lucro = df_filtrado.pivot_table(
-                index='data_registro', 
-                columns='script_origem', 
-                values='lucro_prejuizo', 
-                aggfunc='sum', 
-                fill_value=0.0
-            )
-            
-            # Utilizando a função map_format de forma segura e compatível com todas as versões do Pandas
-            pivot_display = pivot_lucro.reset_index()
-            for col in pivot_lucro.columns:
-                pivot_display[col] = pivot_display[col].apply(lambda x: f"R$ {x:.2f}")
-            pivot_display.rename(columns={'data_registro': 'Data'}, inplace=True)
-            
-            st.dataframe(pivot_display, use_container_width=True)
+            # Agrupamento duplo por Data e Estratégia
+            grp_proj = df_filtrado.groupby(['data_registro', 'script_origem']).agg(
+                lucro=('lucro_prejuizo', 'sum'),
+                investido=('valor_apostado', 'sum')
+            ).reset_index()
+
+            def calc_res_text(row):
+                luc = row['lucro']
+                inv = row['investido']
+                r_pct = (luc / inv * 100) if inv > 0 else 0.0
+                return f"R$ {luc:.2f} ({r_pct:.1f}%)"
+
+            grp_proj['res_formatado'] = grp_proj.apply(calc_res_text, axis=1)
+
+            pivot_proj = grp_proj.pivot_table(
+                index='data_registro',
+                columns='script_origem',
+                values='res_formatado',
+                aggfunc='first',
+                fill_value="R$ 0.00 (0.0%)"
+            ).reset_index()
+
+            pivot_proj.rename(columns={'data_registro': 'Data'}, inplace=True)
+            st.dataframe(pivot_proj, use_container_width=True)
 
             st.divider()
 
@@ -600,8 +611,8 @@ elif aba == "4. Dashboard Financeiro":
             perf_list = []
             for script, group in df_filtrado.groupby('script_origem'):
                 tot = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
-                g = len(group[group['status'].str.strip().str.title() == 'Green'])
-                r = len(group[group['status'].str.strip().str.title() == 'Red'])
+                g = len(group[group['status'] == 'Green'])
+                r = len(group[group['status'] == 'Red'])
                 wr = (g / tot * 100) if tot > 0 else 0
                 inv = group['valor_apostado'].sum()
                 luc = group['lucro_prejuizo'].sum()
