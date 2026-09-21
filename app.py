@@ -33,12 +33,41 @@ def init_db():
             status TEXT DEFAULT 'Pendente'
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS configuracoes (
+            script_nome TEXT PRIMARY KEY,
+            stake_padrao REAL DEFAULT 50.0,
+            top_n INTEGER DEFAULT 10,
+            permitir_copas INTEGER DEFAULT 0,
+            permitir_sub20 INTEGER DEFAULT 0,
+            permitir_feminino INTEGER DEFAULT 0
+        )
+    """)
+    # Inserir padrões padrão se tabela estiver vazia
+    scripts = ['Cantos (Over 9.5)', 'Gols (Over 2.5)', 'Vitória / Dominância']
+    for s in scripts:
+        c.execute("INSERT OR IGNORE INTO configuracoes (script_nome, stake_padrao, top_n, permitir_copas, permitir_sub20, permitir_feminino) VALUES (?, 50.0, 10, 0, 0, 0)", (s,))
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- AUXILIARES E TRATAMENTO DE TEXTO ---
+# --- AUXILIARES DE PARÂMETROS E TRATAMENTO DE TEXTO ---
+def carregar_configuracoes():
+    conn = sqlite3.connect("oportunidades.db")
+    df_cfg = pd.read_sql_query("SELECT * FROM configuracoes", conn)
+    conn.close()
+    configs = {}
+    for _, row in df_cfg.iterrows():
+        configs[row['script_nome']] = {
+            'stake_padrao': float(row['stake_padrao']),
+            'top_n': int(row['top_n']),
+            'permitir_copas': bool(row['permitir_copas']),
+            'permitir_sub20': bool(row['permitir_sub20']),
+            'permitir_feminino': bool(row['permitir_feminino'])
+        }
+    return configs
+
 def fix_str(val):
     s = str(val)
     try:
@@ -47,8 +76,31 @@ def fix_str(val):
         pass
     return s
 
+def filtrar_blacklist(df, col_liga, col_casa, col_fora, cfg):
+    terms_copas = [r'\bcup\b', r'\bcopa\b', r'\btaça\b', r'\btaca\b', r'\btrofeu\b', r'\btroféu\b', r'\bsupercup\b', r'\bsupercopa\b', r'\bshield\b', r'qualif', r'eliminat', r'playoff', r'play-off', r'preliminar', r'preliminary']
+    terms_sub = [r'\byouth\b', r'\bacademy\b', r'\bacademia\b', r'\bjunior\b', r'\bjúnior\b', r'\bu\d{1,2}\b', r'\bsub[- ]?\d{1,2}\b', r'\breserve\b', r'\breserva\b']
+    terms_fem = [r'\bwomen\b', r'\bfeminino\b', r'\bfemenino\b', r'\bfem\b', r'\bwom\b', r'\bdamallsvenskan\b']
+
+    blacklist = []
+    if not cfg['permitir_copas']:
+        blacklist.extend(terms_copas)
+    if not cfg['permitir_sub20']:
+        blacklist.extend(terms_sub)
+    if not cfg['permitir_feminino']:
+        blacklist.extend(terms_fem)
+
+    if not blacklist:
+        return df
+
+    pattern = '|'.join(blacklist)
+    mask_liga = df[col_liga].astype(str).str.lower().str.contains(pattern, regex=True, na=False)
+    mask_casa = df[col_casa].astype(str).str.lower().str.contains(pattern, regex=True, na=False)
+    mask_fora = df[col_fora].astype(str).str.lower().str.contains(pattern, regex=True, na=False)
+
+    return df[~(mask_liga | mask_casa | mask_fora)].copy()
+
 # --- LÓGICA DO SCRIPT 1: CANTOS ---
-def processar_cantos(file):
+def processar_cantos(file, cfg):
     CORRECT_COL_NAMES = [
         "Country", "Short", "League", "Hour", "Status", "Home", "ResHome", "ResAway", "Away", "Odds_Over_95",
         "Corners_Pro_Home", "Corners_Pro_Away", "Corners_Con_Home", "Corners_Con_Away",
@@ -70,25 +122,7 @@ def processar_cantos(file):
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
         df = df.dropna(subset=numeric_cols).copy()
-
-        blacklist_terms = [
-            r'\bcup\b', r'\bcopa\b', r'\btaça\b', r'\btaca\b', r'\btrofeu\b', r'\btroféu\b', 
-            r'\bsupercup\b', r'\bsupercopa\b', r'\bshield\b', r'\bchampionship\s+cup\b',
-            r'qualif', r'eliminat', r'playoff', r'play-off', r'preliminar', r'preliminary',
-            r'\bwomen\b', r'\bfeminino\b', r'\bfemenino\b', r'\bfem\b', r'\bwom\b',
-            r'\bamateur\b', r'\bamador\b', r'\breserve\b', r'\breserva\b', r'\bcasual\b', 
-            r'\bcommunity\b', r'\bregional\b', r'\bpro\s+league\b',
-            r'\byouth\b', r'\bacademy\b', r'\bacademia\b', r'\bjunior\b', r'\bjúnior\b',
-            r'\bu\d{1,2}\b', r'\bsub[- ]?\d{1,2}\b', r'\bfriendly\b', r'\bamigável\b', r'\bamigavel\b',
-            r'\bexhibition\b', r'\bdamallsvenskan\b'
-        ]
-        pattern_blacklist = '|'.join(blacklist_terms)
-        mask_league = df['League'].astype(str).str.lower().str.contains(pattern_blacklist, regex=True, na=False)
-        mask_home = df['Home'].astype(str).str.lower().str.contains(pattern_blacklist, regex=True, na=False)
-        mask_away = df['Away'].astype(str).str.lower().str.contains(pattern_blacklist, regex=True, na=False)
-        
-        df = df[~(mask_league | mask_home | mask_away)].copy()
-        df = df[~df['Home'].astype(str).str.contains(' II') & ~df['Away'].astype(str).str.contains(' II')].copy()
+        df = filtrar_blacklist(df, 'League', 'Home', 'Away', cfg)
 
         df['xCorners_Home'] = (df['Corners_Pro_Home'] * 0.60) + (df['Corners_Con_Away'] * 0.40)
         df['xCorners_Away'] = (df['Corners_Pro_Away'] * 0.40) + (df['Corners_Con_Home'] * 0.60)
@@ -96,8 +130,11 @@ def processar_cantos(file):
         df['APPM_Total'] = (df['APPM_Home'] + df['APPM_Away']).round(2)
 
         df_base = df[(df['Sample_Home'] >= 10) & (df['Sample_Away'] >= 10) & (df['Odds_Over_95'] > 1.0)].copy()
-        df_main = df_base[(df_base['Expectativa_Cruzada'] >= 11.50) & (df_base['APPM_Total'] >= 1.00)].copy()
+        df_main = df_base[(df_base['Expectativa_Cruzada'] >= 11.50) & (df_base['APPM_Total'] >= 1.00)].sort_values(by='Expectativa_Cruzada', ascending=False).copy()
         
+        if cfg['top_n'] > 0:
+            df_main = df_main.head(cfg['top_n'])
+
         resultados = []
         for _, r in df_main.iterrows():
             hora_clean = str(r['Hour'])[-5:] if len(str(r['Hour'])) >= 5 else str(r['Hour'])
@@ -115,7 +152,7 @@ def processar_cantos(file):
         return []
 
 # --- LÓGICA DO SCRIPT 2: GOLS ---
-def processar_gols(file):
+def processar_gols(file, cfg):
     try:
         try:
             df_raw = pd.read_csv(file, sep=None, engine='python', encoding='latin-1')
@@ -158,20 +195,8 @@ def processar_gols(file):
         df_s5['Chutes_Por_Gol'] = df_s5['Total_Chutes_Proj'] / df_s5['Vol_FT']
         df_s5['Barreira_Under'] = df_s5.iloc[:, 24]
 
-        col_pais, col_liga, col_casa, col_fora = df_s5.columns[0], df_s5.columns[2], df_s5.columns[5], df_s5.columns[8]
-
-        pattern_ligas = re.compile(
-            r"\bCup\b|\bCopa\b|\bChampions\b|\bFriendly\b|\bAmig[áa]vel\b|\bAmistoso\b|\bQualification\b|\bPlayoff\b|\bWomen\b|\bFem\b|Amateur|Australia|Zealand|Uzbekistan",
-            flags=re.IGNORECASE
-        )
-        pattern_times = re.compile(r"\bB\b|\bII\b|\b2\b|\bRes\b|\bU17\b|\bU19\b|\bU21\b|\bSub[- ]\d+|Youth|Junior|Academy", flags=re.IGNORECASE)
-
-        mask_pais = df_s5[col_pais].astype(str).str.contains(r'Australia|Zealand|Uzbekistan', case=False, na=False)
-        mask_liga = df_s5[col_liga].astype(str).str.contains(pattern_ligas, na=False)
-        mask_casa = df_s5[col_casa].astype(str).str.contains(pattern_times, na=False)
-        mask_fora = df_s5[col_fora].astype(str).str.contains(pattern_times, na=False)
-
-        df_base = df_s5[~(mask_pais | mask_liga | mask_casa | mask_fora)].copy()
+        col_liga, col_casa, col_fora = df_s5.columns[2], df_s5.columns[5], df_s5.columns[8]
+        df_base = filtrar_blacklist(df_s5, col_liga, col_casa, col_fora, cfg)
 
         df_ht = df_base[(df_base['Vol_HT'] >= 1.5) & (df_base['Total_Chutes_Proj'] >= 15.0) & (df_base['Chutes_Por_Gol'] >= 2.7)].copy()
 
@@ -181,7 +206,10 @@ def processar_gols(file):
         score_hist = df_ht.iloc[:, 23]                                    
 
         df_ht['Score_Elite'] = (score_ft * 0.25) + (score_pressao * 0.30) + (score_freq * 0.25) + (score_hist * 0.20)
-        df_score = df_ht[df_ht['Score_Elite'] >= 60.0].copy()
+        df_score = df_ht[df_ht['Score_Elite'] >= 60.0].sort_values(by='Score_Elite', ascending=False).copy()
+
+        if cfg['top_n'] > 0:
+            df_score = df_score.head(cfg['top_n'])
 
         mask_over25 = (df_score['Vol_FT'] >= 5.0) & (df_score['SideA_FT'] >= 2.5) & (df_score['SideB_FT'] >= 2.5) & (df_score['Barreira_Under'] < 42.0)
         mask_over15 = (df_score['Vol_FT'] >= 5.0) & (df_score['Barreira_Under'] <= 50.0) & (~mask_over25)
@@ -213,7 +241,7 @@ def processar_gols(file):
         return []
 
 # --- LÓGICA DO SCRIPT 3: VITÓRIA ---
-def processar_vitoria(win_file, conf_file, top_n=10):
+def processar_vitoria(win_file, conf_file, cfg):
     try:
         df_win = pd.read_csv(win_file, sep=";", encoding='latin-1')
         df_conf = pd.read_csv(conf_file, sep=";", encoding='latin-1')
@@ -246,6 +274,7 @@ def processar_vitoria(win_file, conf_file, top_n=10):
             merged[col] = pd.to_numeric(merged[col], errors="coerce")
 
         df_clean = merged[(merged["Games_Home"] >= 8) & (merged["Games_Away"] >= 8)].copy()
+        df_clean = filtrar_blacklist(df_clean, 'League', 'Home_Team', 'Visitor_Team', cfg)
 
         df_clean["Diff_Efficiency"] = df_clean["Efficiency_Home"] - df_clean["Efficiency_Away"]
         df_clean["Diff_WinPct"] = df_clean["Win_Pct_Home"] - df_clean["Win_Pct_Away"]
@@ -278,6 +307,8 @@ def processar_vitoria(win_file, conf_file, top_n=10):
         away_picks["Prob"] = away_picks["Prob_Away"]
 
         all_picks = pd.concat([home_picks, away_picks]).sort_values(by="Prob", ascending=False)
+        
+        top_n = cfg['top_n'] if cfg['top_n'] > 0 else 10
         top_picks = all_picks.head(top_n).copy()
 
         resultados = []
@@ -304,16 +335,19 @@ aba = st.sidebar.radio(
         "1. Análise de Arquivos", 
         "2. Gerenciar Entradas (Novas)", 
         "3. Apostas em Andamento", 
-        "4. Dashboard Financeiro"
+        "4. Dashboard Financeiro",
+        "5. Parâmetros & Configurações"
     ]
 )
+
+configs_atuais = carregar_configuracoes()
 
 # ---------------------------------------------------------
 # ABA 1: UPLOAD E PROCESSAMENTO DE DADOS
 # ---------------------------------------------------------
 if aba == "1. Análise de Arquivos":
     st.header("📥 Upload dos Arquivos PackBall")
-    st.write("Envie os arquivos CSV do dia para gerar as oportunidades de todas as estratégias juntas.")
+    st.write("Envie os arquivos CSV do dia para gerar as oportunidades com base nos seus parâmetros configurados.")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -327,15 +361,15 @@ if aba == "1. Análise de Arquivos":
         todas_oportunidades = []
 
         if f_cantos:
-            res = processar_cantos(f_cantos)
+            res = processar_cantos(f_cantos, configs_atuais.get('Cantos (Over 9.5)', {'top_n': 10, 'permitir_copas': False, 'permitir_sub20': False, 'permitir_feminino': False}))
             todas_oportunidades.extend(res)
 
         if f_gols:
-            res = processar_gols(f_gols)
+            res = processar_gols(f_gols, configs_atuais.get('Gols (Over 2.5)', {'top_n': 10, 'permitir_copas': False, 'permitir_sub20': False, 'permitir_feminino': False}))
             todas_oportunidades.extend(res)
 
         if f_win and f_conf:
-            res = processar_vitoria(f_win, f_conf)
+            res = processar_vitoria(f_win, f_conf, configs_atuais.get('Vitória / Dominância', {'top_n': 10, 'permitir_copas': False, 'permitir_sub20': False, 'permitir_feminino': False}))
             todas_oportunidades.extend(res)
 
         if todas_oportunidades:
@@ -376,6 +410,9 @@ elif aba == "2. Gerenciar Entradas (Novas)":
         st.info("Nenhuma sugestão pendente no momento!")
     else:
         for estrategia, grupo in df_entradas.groupby('script_origem'):
+            # Buscar stake parametrizada para o projeto
+            stake_padrao = configs_atuais.get(estrategia, {}).get('stake_padrao', 50.0)
+            
             with st.expander(f"📁 {estrategia} ({len(grupo)} oportunidades)", expanded=False):
                 for idx, row in grupo.iterrows():
                     st.markdown(f"##### ⏰ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
@@ -389,7 +426,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
                         key_odd = f"odd_{row['id']}"
                         key_val = f"val_{row['id']}"
                         odd_comprada = st.number_input("Odd Real Comprada:", value=float(row['odd_sugerida']), step=0.01, key=key_odd)
-                        valor_apostado = st.number_input("Valor Apostado (R$):", value=50.0, step=5.0, key=key_val)
+                        valor_apostado = st.number_input("Valor Apostado (R$):", value=float(stake_padrao), step=5.0, key=key_val)
 
                     with col_botoes:
                         key_conf = f"conf_{row['id']}"
@@ -474,7 +511,7 @@ elif aba == "3. Apostas em Andamento":
     conn.close()
 
 # ---------------------------------------------------------
-# ABA 4: DASHBOARD FINANCEIRO & PERFORMANCE COM FILTROS DE DATA
+# ABA 4: DASHBOARD FINANCEIRO
 # ---------------------------------------------------------
 elif aba == "4. Dashboard Financeiro":
     st.header("📊 Painel de Desempenho Financeiro")
@@ -549,9 +586,7 @@ elif aba == "4. Dashboard Financeiro":
 
             st.divider()
 
-            # --- DETALHAMENTO DIÁRIO GERAL (COM ROI) ---
             st.subheader("📅 Desempenho Detalhado por Dia")
-            
             diario_list = []
             for dt, group in df_filtrado.groupby('data_registro', sort=False):
                 tot_d = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
@@ -572,15 +607,11 @@ elif aba == "4. Dashboard Financeiro":
                     'Lucro do Dia (R$)': f"R$ {luc_d:.2f}",
                     'ROI (%)': f"{roi_d:.1f}%"
                 })
-            
             st.dataframe(pd.DataFrame(diario_list), use_container_width=True)
 
             st.divider()
 
-            # --- DETALHAMENTO DIÁRIO POR PROJETO / ESTRATÉGIA (COM ROI) ---
             st.subheader("📁 Resultado Diário por Projeto / Estratégia")
-            
-            # Agrupamento duplo por Data e Estratégia
             grp_proj = df_filtrado.groupby(['data_registro', 'script_origem']).agg(
                 lucro=('lucro_prejuizo', 'sum'),
                 investido=('valor_apostado', 'sum')
@@ -593,7 +624,6 @@ elif aba == "4. Dashboard Financeiro":
                 return f"R$ {luc:.2f} ({r_pct:.1f}%)"
 
             grp_proj['res_formatado'] = grp_proj.apply(calc_res_text, axis=1)
-
             pivot_proj = grp_proj.pivot_table(
                 index='data_registro',
                 columns='script_origem',
@@ -601,7 +631,6 @@ elif aba == "4. Dashboard Financeiro":
                 aggfunc='first',
                 fill_value="R$ 0.00 (0.0%)"
             ).reset_index()
-
             pivot_proj.rename(columns={'data_registro': 'Data'}, inplace=True)
             st.dataframe(pivot_proj, use_container_width=True)
 
@@ -632,13 +661,10 @@ elif aba == "4. Dashboard Financeiro":
             st.divider()
 
             with st.expander("🛠️ Corrigir ou Excluir uma Entrada Registrada"):
-                st.write("Caso tenha marcado um Green, Red, Stake ou Odd errado, selecione o registro abaixo para editar:")
-                
                 opcoes_editar = {
                     f"ID {r['id']} | {r['data_registro']} - {r['jogo']} [{r['script_origem']}] - Status: {r['status']}": r['id'] 
                     for _, r in df_filtrado.iterrows()
                 }
-                
                 sel_label = st.selectbox("Selecione a Aposta para Editar:", list(opcoes_editar.keys()))
                 id_selecionado = opcoes_editar[sel_label]
                 row_edit = df_filtrado[df_filtrado['id'] == id_selecionado].iloc[0]
@@ -652,13 +678,7 @@ elif aba == "4. Dashboard Financeiro":
                 btn_deletar_hist = ec4.button("🗑️ Deletar Registro", use_container_width=True)
 
                 if btn_salvar:
-                    if novo_status == "Green":
-                        novo_lucro = (nova_odd - 1) * novo_valor
-                    elif novo_status == "Red":
-                        novo_lucro = -novo_valor
-                    else:
-                        novo_lucro = 0.0
-
+                    novo_lucro = (nova_odd - 1) * novo_valor if novo_status == "Green" else (-novo_valor if novo_status == "Red" else 0.0)
                     c = conn.cursor()
                     sql_edit = "UPDATE entradas SET status = ?, odd_comprada = ?, valor_apostado = ?, lucro_prejuizo = ? WHERE id = ?"
                     c.execute(sql_edit, (novo_status, nova_odd, novo_valor, novo_lucro, id_selecionado))
@@ -677,3 +697,51 @@ elif aba == "4. Dashboard Financeiro":
             st.subheader("📋 Histórico Detalhado do Período Selecionado")
             st.dataframe(df_filtrado[['id', 'data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']], use_container_width=True)
         conn.close()
+
+# ---------------------------------------------------------
+# ABA 5: PARÂMETROS & CONFIGURAÇÕES (NOVA ABA)
+# ---------------------------------------------------------
+elif aba == "5. Parâmetros & Configurações":
+    st.header("⚙️ Parâmetros de Entrada por Projeto")
+    st.write("Ajuste as regras de filtragem, limite de recomendações e stake fixa padrão para cada estratégia.")
+
+    scripts_disponiveis = [
+        'Cantos (Over 9.5)',
+        'Gols (Over 2.5)',
+        'Vitória / Dominância'
+    ]
+
+    for script in scripts_disponiveis:
+        cfg = configs_atuais.get(script, {
+            'stake_padrao': 50.0,
+            'top_n': 10,
+            'permitir_copas': False,
+            'permitir_sub20': False,
+            'permitir_feminino': False
+        })
+
+        with st.expander(f"🛠️ Parâmetros do Projeto: {script}", expanded=True):
+            col_cfg1, col_cfg2 = st.columns(2)
+
+            with col_cfg1:
+                nova_stake = st.number_input(f"Stake Fixa Padrão (R$):", value=float(cfg['stake_padrao']), step=5.0, key=f"cfg_stake_{script}")
+                novo_top_n = st.number_input(f"Limite de Retornos (Top N jogos):", value=int(cfg['top_n']), min_value=1, max_value=100, step=1, key=f"cfg_top_{script}")
+
+            with col_cfg2:
+                st.write("**Filtros de Ligas Aceitas:**")
+                perm_copas = st.checkbox("Incluir Copas e Torneios Eliminatórios", value=bool(cfg['permitir_copas']), key=f"cfg_copas_{script}")
+                perm_sub20 = st.checkbox("Incluir Ligas Sub-20 / Sub-23 / Formação", value=bool(cfg['permitir_sub20']), key=f"cfg_sub_{script}")
+                perm_fem = st.checkbox("Incluir Jogos de Futebol Feminino", value=bool(cfg['permitir_feminino']), key=f"cfg_fem_{script}")
+
+            if st.button(f"💾 Salvar Parâmetros para {script}", key=f"btn_save_cfg_{script}", use_container_width=True):
+                conn = sqlite3.connect("oportunidades.db")
+                c = conn.cursor()
+                sql_save_cfg = """
+                    INSERT OR REPLACE INTO configuracoes (script_nome, stake_padrao, top_n, permitir_copas, permitir_sub20, permitir_feminino)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """
+                c.execute(sql_save_cfg, (script, nova_stake, novo_top_n, int(perm_copas), int(perm_sub20), int(perm_fem)))
+                conn.commit()
+                conn.close()
+                st.toast(f"Parâmetros de '{script}' atualizados com sucesso!")
+                st.rerun()
