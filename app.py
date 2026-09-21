@@ -35,14 +35,14 @@ def init_db():
             valor_apostado REAL DEFAULT 0.0,
             lucro_prejuizo REAL DEFAULT 0.0,
             status TEXT DEFAULT 'Pendente',
-            placar_ao_vivo TEXT DEFAULT 'Não consultado'
+            placar_ao_vivo TEXT DEFAULT 'Aguardando início'
         )
     """)
     
     c.execute("PRAGMA table_info(entradas)")
     cols = [col[1] for col in c.fetchall()]
     if 'placar_ao_vivo' not in cols:
-        c.execute("ALTER TABLE entradas ADD COLUMN placar_ao_vivo TEXT DEFAULT 'Não consultado'")
+        c.execute("ALTER TABLE entradas ADD COLUMN placar_ao_vivo TEXT DEFAULT 'Aguardando início'")
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS configuracoes (
@@ -66,61 +66,6 @@ def init_db():
     conn.close()
 
 init_db()
-
-# --- FUNÇÃO DE BUSCA DE PLACAR AO VIVO (WEB SCRAPING ROBUSTO AJUSTADO) ---
-def obter_placar_ao_vivo(nome_jogo):
-    try:
-        # Query refinada para forçar o Google a exibir o painel de placar esportivo
-        query = f"futebol {nome_jogo} placar ao vivo"
-        url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&hl=pt-BR&gl=br"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
-        }
-        res = requests.get(url, headers=headers, timeout=6)
-        if res.status_code == 200:
-            soup = BeautifulSoup(res.text, 'html.parser')
-            
-            # 1. Tentar capturar o painel de placar do Google (geralmente em divs específicas de eventos esportivos)
-            # Procuramos por padrões que contenham minutos de jogo ou andamento (ex: 'º', ''', 'Em andamento', 'Intervalo', 'Fim de jogo')
-            texto_completo = soup.get_text()
-            
-            # Procurar por termos de status na página
-            status_jogo = ""
-            if "Intervalo" in texto_completo:
-                status_jogo = " (Intervalo)"
-            elif "Fim de jogo" in texto_completo or "Encerrado" in texto_completo:
-                status_jogo = " (Encerrado)"
-            elif re.search(r"\d+['º]", texto_completo):
-                match_tempo = re.search(r"(\d+['º])", texto_completo)
-                if match_tempo:
-                    status_jogo = f" ({match_tempo.group(1)})"
-            
-            # Procurar blocos de placar (ex: números separados por hífen ou traço isolados em tags de placar)
-            # O Google costuma colocar os gols dos times em elementos com classes próprias ou próximos aos nomes
-            placar_candidatos = []
-            for el in soup.find_all(['div', 'span', 'b']):
-                txt = el.get_text().strip()
-                # Verifica se o texto é estritamente um placar simples tipo "2 - 1" ou "0 - 0"
-                if re.match(r'^\d+\s*[-–]\s*\d+$', txt):
-                    placar_candidatos.append(txt)
-            
-            if placar_candidatos:
-                # O primeiro costuma ser o placar principal do jogo pesquisado
-                return f"⚽ {placar_candidatos[0]}{status_jogo if status_jogo else ' (Em Andamento)'}"
-
-            # Fallback: Varredura de regex genérica no texto da página por placares evidentes
-            matches = re.findall(r'(\d+)\s*[-–]\s*(\d+)', texto_completo)
-            if matches:
-                # Pega o primeiro placar encontrado que faça sentido
-                for m in matches:
-                    p1, p2 = int(m[0]), int(m[1])
-                    if p1 <= 15 and p2 <= 15: # Filtro de sanidade para placar de futebol
-                        return f"⚽ {p1} x {p2}{status_jogo if status_jogo else ' (Em Andamento)'}"
-
-        return "⏳ Aguardando início / Placar indisponível"
-    except Exception:
-        return "⏳ Aguardando início / Placar indisponível"
 
 # --- AUXILIARES DE PARÂMETROS E TRATAMENTO DE TEXTO ---
 def carregar_configuracoes():
@@ -492,7 +437,7 @@ if aba == "1. Análise de Arquivos":
             st.success("✅ Oportunidades enviadas com sucesso! Acesse a aba '2. Gerenciar Entradas' para acompanhar.")
 
 # ---------------------------------------------------------
-# ABA 2: GERENCIAR ENTRADAS NOVAS (COM PLACAR AO VIVO)
+# ABA 2: GERENCIAR ENTRADAS NOVAS
 # ---------------------------------------------------------
 elif aba == "2. Gerenciar Entradas (Novas)":
     st.header("🎯 Sugestões Pendentes por Estratégia")
@@ -500,17 +445,6 @@ elif aba == "2. Gerenciar Entradas (Novas)":
 
     conn = sqlite3.connect("oportunidades.db")
     df_entradas = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'pendente' ORDER BY script_origem ASC, hora ASC", conn)
-
-    if not df_entradas.empty:
-        if st.button("🔄 Atualizar Placares Ao Vivo", key="btn_update_pend", use_container_width=True):
-            with st.spinner("Consultando placares dos jogos..."):
-                c = conn.cursor()
-                for _, r_p in df_entradas.iterrows():
-                    placar = obter_placar_ao_vivo(r_p['jogo'])
-                    c.execute("UPDATE entradas SET placar_ao_vivo = ? WHERE id = ?", (placar, r_p['id']))
-                conn.commit()
-                st.toast("Placares atualizados!")
-                st.rerun()
 
     if df_entradas.empty:
         st.info("Nenhuma sugestão pendente no momento!")
@@ -520,9 +454,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
             
             with st.expander(f"📁 {estrategia} ({len(grupo)} oportunidades)", expanded=True):
                 for idx, row in grupo.iterrows():
-                    placar_str = row.get('placar_ao_vivo', 'Não consultado')
                     st.markdown(f"##### ⏰ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
-                    st.caption(f"📺 **Placar / Status:** {placar_str}")
                     
                     col_info, col_inputs, col_botoes = st.columns([2.5, 2.5, 1.5])
 
@@ -561,7 +493,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
     conn.close()
 
 # ---------------------------------------------------------
-# ABA 3: APOSTAS EM ANDAMENTO (COM PLACAR AO VIVO)
+# ABA 3: APOSTAS EM ANDAMENTO
 # ---------------------------------------------------------
 elif aba == "3. Apostas em Andamento":
     st.header("⏳ Apostas Confirmadas (Aguardando Resultado)")
@@ -569,26 +501,13 @@ elif aba == "3. Apostas em Andamento":
     conn = sqlite3.connect("oportunidades.db")
     df_andamento = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'em andamento' ORDER BY script_origem ASC, hora ASC", conn)
 
-    if not df_andamento.empty:
-        if st.button("🔄 Atualizar Placares Ao Vivo", key="btn_update_and", use_container_width=True):
-            with st.spinner("Consultando placares dos jogos..."):
-                c = conn.cursor()
-                for _, r_a in df_andamento.iterrows():
-                    placar = obter_placar_ao_vivo(r_a['jogo'])
-                    c.execute("UPDATE entradas SET placar_ao_vivo = ? WHERE id = ?", (placar, r_a['id']))
-                conn.commit()
-                st.toast("Placares atualizados!")
-                st.rerun()
-
     if df_andamento.empty:
         st.info("Nenhuma aposta em andamento no momento!")
     else:
         for estrategia, grupo in df_andamento.groupby('script_origem'):
             with st.expander(f"📁 {estrategia} ({len(grupo)} apostas ativas)", expanded=True):
                 for idx, row in grupo.iterrows():
-                    placar_str = row.get('placar_ao_vivo', 'Não consultado')
                     st.markdown(f"##### ⚽ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
-                    st.caption(f"📺 **Placar / Status:** {placar_str}")
                     
                     col_info, col_botoes = st.columns([3, 2])
 
@@ -821,7 +740,7 @@ elif aba == "4. Dashboard Financeiro":
         conn.close()
 
 # ---------------------------------------------------------
-# ABA 5: PARÂMETROS & CONFIGURAções
+# ABA 5: PARÂMETROS & CONFIGURAÇÕES
 # ---------------------------------------------------------
 elif aba == "5. Parâmetros & Configurações":
     st.header("⚙️ Parâmetros de Entrada por Projeto")
