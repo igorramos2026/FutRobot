@@ -681,8 +681,8 @@ elif aba == "4. Dashboard Financeiro":
             perf_list = []
             for script, group in df_filtrado.groupby('script_origem'):
                 tot = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
-                g = len(group[group['status'] == 'Green'])
-                r = len(group[group['status'] == 'Red'])
+                g = len(group[group['status'].str.strip().str.title() == 'Green'])
+                r = len(group[group['status'].str.strip().str.title() == 'Red'])
                 wr = (g / tot * 100) if tot > 0 else 0
                 inv = group['valor_apostado'].sum()
                 luc = group['lucro_prejuizo'].sum()
@@ -694,7 +694,7 @@ elif aba == "4. Dashboard Financeiro":
                     'Reds': r,
                     'Assertividade (%)': f"{wr:.1f}%",
                     'Investimento (R\()': f"R\) {inv:.2f}",
-                    'Lucro Líquido (R\()': f"R\) {luc_d:.2f}" if 'luc_d' in locals() else f"R$ {luc:.2f}",
+                    'Lucro Líquido (R\()': f"R\) {luc:.2f}",
                     'ROI (%)': f"{roi_script:.1f}%"
                 })
             st.dataframe(pd.DataFrame(perf_list), use_container_width=True)
