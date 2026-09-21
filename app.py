@@ -67,30 +67,57 @@ def init_db():
 
 init_db()
 
-# --- FUNÇÃO DE BUSCA DE PLACAR AO VIVO (WEB SCRAPING ROBUSTO) ---
+# --- FUNÇÃO DE BUSCA DE PLACAR AO VIVO (WEB SCRAPING ROBUSTO AJUSTADO) ---
 def obter_placar_ao_vivo(nome_jogo):
     try:
-        query = f"{nome_jogo} placar ao vivo flashscore"
-        url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&hl=pt-BR"
+        # Query refinada para forçar o Google a exibir o painel de placar esportivo
+        query = f"futebol {nome_jogo} placar ao vivo"
+        url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&hl=pt-BR&gl=br"
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
         }
-        res = requests.get(url, headers=headers, timeout=5)
+        res = requests.get(url, headers=headers, timeout=6)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             
-            # Tentar encontrar blocos com placares evidentes (ex: Placar do Google)
-            for el in soup.find_all(['div', 'span'], text=re.compile(r'\d+\s*[-–]\s*\d+')):
-                txt = el.get_text().strip()
-                if len(txt) < 20 and re.search(r'\d+\s*[-–]\s*\d+', txt):
-                    return f"⚽ {txt} (Em Andamento)"
-
-            # Busca genérica por padrões de placar no texto completo
-            texto_pagina = soup.get_text()
-            match = re.search(r'(\d+)\s*[-–]\s*(\d+)', texto_pagina)
-            if match:
-                return f"⚽ {match.group(1)} x {match.group(2)} (Em Andamento)"
+            # 1. Tentar capturar o painel de placar do Google (geralmente em divs específicas de eventos esportivos)
+            # Procuramos por padrões que contenham minutos de jogo ou andamento (ex: 'º', ''', 'Em andamento', 'Intervalo', 'Fim de jogo')
+            texto_completo = soup.get_text()
             
+            # Procurar por termos de status na página
+            status_jogo = ""
+            if "Intervalo" in texto_completo:
+                status_jogo = " (Intervalo)"
+            elif "Fim de jogo" in texto_completo or "Encerrado" in texto_completo:
+                status_jogo = " (Encerrado)"
+            elif re.search(r"\d+['º]", texto_completo):
+                match_tempo = re.search(r"(\d+['º])", texto_completo)
+                if match_tempo:
+                    status_jogo = f" ({match_tempo.group(1)})"
+            
+            # Procurar blocos de placar (ex: números separados por hífen ou traço isolados em tags de placar)
+            # O Google costuma colocar os gols dos times em elementos com classes próprias ou próximos aos nomes
+            placar_candidatos = []
+            for el in soup.find_all(['div', 'span', 'b']):
+                txt = el.get_text().strip()
+                # Verifica se o texto é estritamente um placar simples tipo "2 - 1" ou "0 - 0"
+                if re.match(r'^\d+\s*[-–]\s*\d+$', txt):
+                    placar_candidatos.append(txt)
+            
+            if placar_candidatos:
+                # O primeiro costuma ser o placar principal do jogo pesquisado
+                return f"⚽ {placar_candidatos[0]}{status_jogo if status_jogo else ' (Em Andamento)'}"
+
+            # Fallback: Varredura de regex genérica no texto da página por placares evidentes
+            matches = re.findall(r'(\d+)\s*[-–]\s*(\d+)', texto_completo)
+            if matches:
+                # Pega o primeiro placar encontrado que faça sentido
+                for m in matches:
+                    p1, p2 = int(m[0]), int(m[1])
+                    if p1 <= 15 and p2 <= 15: # Filtro de sanidade para placar de futebol
+                        return f"⚽ {p1} x {p2}{status_jogo if status_jogo else ' (Em Andamento)'}"
+
         return "⏳ Aguardando início / Placar indisponível"
     except Exception:
         return "⏳ Aguardando início / Placar indisponível"
@@ -698,8 +725,8 @@ elif aba == "4. Dashboard Financeiro":
                     'Greens': g_d,
                     'Reds': r_d,
                     'Assertividade (%)': f"{wr_d:.1f}%",
-                    'Investido (R$)': f"R$ {inv_d:.2f}",
-                    'Lucro do Dia (R$)': f"R$ {luc_d:.2f}",
+                    'Investido (R\()': f"R\) {inv_d:.2f}",
+                    'Lucro do Dia (R\()': f"R\) {luc_d:.2f}",
                     'ROI (%)': f"{roi_d:.1f}%"
                 })
             st.dataframe(pd.DataFrame(diario_list), use_container_width=True)
@@ -747,8 +774,8 @@ elif aba == "4. Dashboard Financeiro":
                     'Greens': g,
                     'Reds': r,
                     'Assertividade (%)': f"{wr:.1f}%",
-                    'Investimento (R$)': f"R$ {inv:.2f}",
-                    'Lucro Líquido (R$)': f"R$ {luc:.2f}",
+                    'Investimento (R\()': f"R\) {inv:.2f}",
+                    'Lucro Líquido (R\()': f"R\) {luc_d:.2f}" if 'luc_d' in locals() else f"R$ {luc:.2f}",
                     'ROI (%)': f"{roi_script:.1f}%"
                 })
             st.dataframe(pd.DataFrame(perf_list), use_container_width=True)
@@ -794,7 +821,7 @@ elif aba == "4. Dashboard Financeiro":
         conn.close()
 
 # ---------------------------------------------------------
-# ABA 5: PARÂMETROS & CONFIGURAÇÕES
+# ABA 5: PARÂMETROS & CONFIGURAções
 # ---------------------------------------------------------
 elif aba == "5. Parâmetros & Configurações":
     st.header("⚙️ Parâmetros de Entrada por Projeto")
