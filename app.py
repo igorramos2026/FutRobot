@@ -114,6 +114,15 @@ def filtrar_blacklist(df, col_liga, col_casa, col_fora, cfg):
 
     return df[~(mask_liga | mask_casa | mask_fora)].copy()
 
+# --- FUNÇÕES DE ESTILO (CORES PARA LUCRO E ROI) ---
+def colorir_lucro(val):
+    if isinstance(val, (int, float)):
+        if val > 0:
+            return 'color: #2e7d32; font-weight: bold;'
+        elif val < 0:
+            return 'color: #c62828; font-weight: bold;'
+    return ''
+
 # --- LÓGICA DO SCRIPT 1: CANTOS ---
 def processar_cantos(file, cfg):
     CORRECT_COL_NAMES = [
@@ -611,12 +620,20 @@ elif aba == "4. Dashboard Financeiro":
             lucro_total = df_filtrado['lucro_prejuizo'].sum()
             roi = (lucro_total / total_investido * 100) if total_investido > 0 else 0
 
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Entradas Finalizadas", total_apostas)
-            c2.metric("🟢 Greens / 🔴 Reds", f"{greens} / {reds}")
+            # Cálculo do Max Drawdown
+            df_dd_calc = df_filtrado.sort_values('data_registro').copy()
+            df_dd_calc['Lucro_Acum'] = df_dd_calc['lucro_prejuizo'].cumsum()
+            df_dd_calc['Pico'] = df_dd_calc['Lucro_Acum'].cummax()
+            df_dd_calc['Drawdown'] = df_dd_calc['Lucro_Acum'] - df_dd_calc['Pico']
+            max_drawdown = df_dd_calc['Drawdown'].min() if not df_dd_calc.empty else 0.0
+
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
+            c1.metric("Entradas", total_apostas)
+            c2.metric("🟢 G / 🔴 R", f"{greens} / {reds}")
             c3.metric("Assertividade", f"{winrate:.1f}%")
-            c4.metric("Total Investido", f"R$ {total_investido:.2f}")
+            c4.metric("Investido", f"R$ {total_investido:.2f}")
             c5.metric("Lucro Líquido", f"R$ {lucro_total:.2f}", delta=f"{roi:.1f}% ROI")
+            c6.metric("Max Drawdown", f"R$ {max_drawdown:.2f}")
 
             st.divider()
 
@@ -624,6 +641,91 @@ elif aba == "4. Dashboard Financeiro":
             df_chart = df_filtrado.groupby('data_registro')['lucro_prejuizo'].sum().reset_index()
             df_chart['Lucro_Acumulado'] = df_chart['lucro_prejuizo'].cumsum()
             st.line_chart(df_chart.set_index('data_registro')['Lucro_Acumulado'])
+
+            st.divider()
+
+            # --- NOVA SEÇÃO: ANÁLISE POR FAIXA DE ODD ---
+            st.subheader("🎯 Desempenho por Faixa de Odd")
+            bins = [1.0, 1.5, 1.75, 2.0, 2.5, 50.0]
+            labels = ['Até 1.50', '1.51 - 1.75', '1.76 - 2.00', '2.01 - 2.50', 'Acima de 2.50']
+            df_filtrado['Faixa_Odd'] = pd.cut(df_filtrado['odd_comprada'], bins=bins, labels=labels, right=True, include_lowest=True)
+            
+            odd_perf = []
+            for faixa, group in df_filtrado.groupby('Faixa_Odd', observed=False):
+                tot_o = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
+                g_o = len(group[group['status'].str.strip().str.title() == 'Green'])
+                r_o = len(group[group['status'].str.strip().str.title() == 'Red'])
+                wr_o = (g_o / tot_o * 100) if tot_o > 0 else 0
+                inv_o = group['valor_apostado'].sum()
+                luc_o = group['lucro_prejuizo'].sum()
+                roi_o = (luc_o / inv_o * 100) if inv_o > 0 else 0
+                if tot_o > 0:
+                    odd_perf.append({
+                        'Faixa de Odd': faixa,
+                        'Entradas': tot_o,
+                        'Greens': g_o,
+                        'Reds': r_o,
+                        'Assertividade (%)': f"{wr_o:.1f}%",
+                        'Investimento (R$)': inv_o,
+                        'Lucro Líquido (R$)': luc_o,
+                        'ROI (%)': roi_o
+                    })
+            df_odd_perf = pd.DataFrame(odd_perf)
+            if not df_odd_perf.empty:
+                st.dataframe(
+                    df_odd_perf.style.format({
+                        'Investimento (R\()': 'R\) {:.2f}',
+                        'Lucro Líquido (R\()': 'R\) {:.2f}',
+                        'ROI (%)': '{:.1f}%'
+                    }).applymap(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
+                    use_container_width=True
+                )
+            else:
+                st.info("Dados insuficientes para análise por faixa de odd.")
+
+            st.divider()
+
+            # --- NOVA SEÇÃO: ANÁLISE POR DIA DA SEMANA ---
+            st.subheader("📅 Desempenho por Dia da Semana")
+            dias_map = {0: 'Segunda-feira', 1: 'Terça-feira', 2: 'Quarta-feira', 3: 'Quinta-feira', 4: 'Sexta-feira', 5: 'Sábado', 6: 'Domingo'}
+            ordem_dias = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
+            
+            df_filtrado['Dia_Semana'] = pd.to_datetime(df_filtrado['data_registro']).dt.dayofweek.map(dias_map)
+            
+            semana_perf = []
+            for dia, group in df_filtrado.groupby('Dia_Semana'):
+                tot_d = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
+                g_d = len(group[group['status'].str.strip().str.title() == 'Green'])
+                r_d = len(group[group['status'].str.strip().str.title() == 'Red'])
+                wr_d = (g_d / tot_d * 100) if tot_d > 0 else 0
+                inv_d = group['valor_apostado'].sum()
+                luc_d = group['lucro_prejuizo'].sum()
+                roi_d = (luc_d / inv_d * 100) if inv_d > 0 else 0
+                semana_perf.append({
+                    'Dia da Semana': dia,
+                    'Entradas': tot_d,
+                    'Greens': g_d,
+                    'Reds': r_d,
+                    'Assertividade (%)': f"{wr_d:.1f}%",
+                    'Investimento (R$)': inv_d,
+                    'Lucro Líquido (R$)': luc_d,
+                    'ROI (%)': roi_d
+                })
+            df_semana_perf = pd.DataFrame(semana_perf)
+            if not df_semana_perf.empty:
+                df_semana_perf['ordem'] = df_semana_perf['Dia_Semana'].map(lambda x: ordem_dias.index(x) if x in ordem_dias else 99)
+                df_semana_perf = df_semana_perf.sort_values('ordem').drop(columns='ordem')
+                
+                st.dataframe(
+                    df_semana_perf.style.format({
+                        'Investimento (R\()': 'R\) {:.2f}',
+                        'Lucro Líquido (R\()': 'R\) {:.2f}',
+                        'ROI (%)': '{:.1f}%'
+                    }).applymap(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
+                    use_container_width=True
+                )
+            else:
+                st.info("Dados insuficientes para análise por dia da semana.")
 
             st.divider()
 
@@ -644,11 +746,21 @@ elif aba == "4. Dashboard Financeiro":
                     'Greens': g_d,
                     'Reds': r_d,
                     'Assertividade (%)': f"{wr_d:.1f}%",
-                    'Investido (R\()': f"R\) {inv_d:.2f}",
-                    'Lucro do Dia (R\()': f"R\) {luc_d:.2f}",
-                    'ROI (%)': f"{roi_d:.1f}%"
+                    'Investimento (R$)': inv_d,
+                    'Lucro do Dia (R$)': luc_d,
+                    'ROI (%)': roi_d
                 })
-            st.dataframe(pd.DataFrame(diario_list), use_container_width=True)
+            
+            df_diario = pd.DataFrame(diario_list)
+            if not df_diario.empty:
+                st.dataframe(
+                    df_diario.style.format({
+                        'Investimento (R\()': 'R\) {:.2f}',
+                        'Lucro do Dia (R\()': 'R\) {:.2f}',
+                        'ROI (%)': '{:.1f}%'
+                    }).applymap(colorir_lucro, subset=['Lucro do Dia (R$)', 'ROI (%)']),
+                    use_container_width=True
+                )
 
             st.divider()
 
@@ -658,22 +770,24 @@ elif aba == "4. Dashboard Financeiro":
                 investido=('valor_apostado', 'sum')
             ).reset_index()
 
-            def calc_res_text(row):
-                luc = row['lucro']
-                inv = row['investido']
-                r_pct = (luc / inv * 100) if inv > 0 else 0.0
-                return f"R$ {luc:.2f} ({r_pct:.1f}%)"
-
-            grp_proj['res_formatado'] = grp_proj.apply(calc_res_text, axis=1)
-            pivot_proj = grp_proj.pivot_table(
+            pivot_lucro = grp_proj.pivot_table(
                 index='data_registro',
                 columns='script_origem',
-                values='res_formatado',
+                values='lucro',
                 aggfunc='first',
-                fill_value="R$ 0.00 (0.0%)"
+                fill_value=0.0
             ).reset_index()
-            pivot_proj.rename(columns={'data_registro': 'Data'}, inplace=True)
-            st.dataframe(pivot_proj, use_container_width=True)
+            pivot_lucro.rename(columns={'data_registro': 'Data'}, inplace=True)
+            
+            if len(pivot_lucro.columns) > 1:
+                cols_num_proj = [c for c in pivot_lucro.columns if c != 'Data']
+                st.dataframe(
+                    pivot_lucro.style.format({c: 'R$ {:.2f}' for c in cols_num_proj})
+                    .applymap(colorir_lucro, subset=cols_num_proj),
+                    use_container_width=True
+                )
+            else:
+                st.dataframe(pivot_lucro, use_container_width=True)
 
             st.divider()
 
@@ -693,11 +807,21 @@ elif aba == "4. Dashboard Financeiro":
                     'Greens': g,
                     'Reds': r,
                     'Assertividade (%)': f"{wr:.1f}%",
-                    'Investimento (R\()': f"R\) {inv:.2f}",
-                    'Lucro Líquido (R\()': f"R\) {luc:.2f}",
-                    'ROI (%)': f"{roi_script:.1f}%"
+                    'Investimento (R$)': inv,
+                    'Lucro Líquido (R$)': luc,
+                    'ROI (%)': roi_script
                 })
-            st.dataframe(pd.DataFrame(perf_list), use_container_width=True)
+            
+            df_perf = pd.DataFrame(perf_list)
+            if not df_perf.empty:
+                st.dataframe(
+                    df_perf.style.format({
+                        'Investimento (R\()': 'R\) {:.2f}',
+                        'Lucro Líquido (R\()': 'R\) {:.2f}',
+                        'ROI (%)': '{:.1f}%'
+                    }).applymap(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
+                    use_container_width=True
+                )
 
             st.divider()
 
@@ -736,7 +860,15 @@ elif aba == "4. Dashboard Financeiro":
                     st.rerun()
 
             st.subheader("📋 Histórico Detalhado do Período Selecionado")
-            st.dataframe(df_filtrado[['id', 'data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']], use_container_width=True)
+            df_historico_view = df_filtrado[['id', 'data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']].copy()
+            st.dataframe(
+                df_historico_view.style.format({
+                    'odd_comprada': '{:.2f}',
+                    'valor_apostado': 'R$ {:.2f}',
+                    'lucro_prejuizo': 'R$ {:.2f}'
+                }).applymap(colorir_lucro, subset=['lucro_prejuizo']),
+                use_container_width=True
+            )
         conn.close()
 
 # ---------------------------------------------------------
