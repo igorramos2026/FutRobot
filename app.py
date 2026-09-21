@@ -72,7 +72,7 @@ def init_db():
 
 init_db()
 
-# --- INTEGRAÇÃO COM API-FOOTBALL (DADOS LIMPOS) ---
+# --- INTEGRAÇÃO COM API-FOOTBALL (ROBUSTA) ---
 def carregar_api_key():
     conn = sqlite3.connect("oportunidades.db")
     c = conn.cursor()
@@ -83,6 +83,13 @@ def carregar_api_key():
         return res[0]
     return "0643621bd1msh310745680e8ac73p10a756jsn4dff9e95dfcf"
 
+def limpar_nome_time(nome):
+    # Remove acentos e caracteres especiais para facilitar o match
+    import unicodedata
+    nfkd = unicodedata.normalize('NFKD', nome)
+    palavra_sem_acento = "".join([c for c in nfkd if not unicodedata.combining(c)])
+    return re.sub(r'[^a-zA-Z0-9 ]', '', palavra_sem_acento).lower().strip()
+
 def obter_placar_api_football(nome_jogo):
     api_key = carregar_api_key()
     
@@ -90,7 +97,9 @@ def obter_placar_api_football(nome_jogo):
         try:
             parts = nome_jogo.split(" vs ")
             if len(parts) >= 2:
-                home_team, away_team = parts[0].strip(), parts[1].strip()
+                home_raw, away_raw = parts[0].strip(), parts[1].strip()
+                home_clean = limpar_nome_time(home_raw)
+                away_clean = limpar_nome_time(away_raw)
 
                 url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
                 hoje = date.today().isoformat()
@@ -100,7 +109,7 @@ def obter_placar_api_football(nome_jogo):
                 }
                 params = {"date": hoje}
 
-                response = requests.get(url, headers=headers, params=params, timeout=6)
+                response = requests.get(url, headers=headers, params=params, timeout=8)
                 if response.status_code == 200:
                     data = response.json()
                     fixtures = data.get("response", [])
@@ -109,29 +118,37 @@ def obter_placar_api_football(nome_jogo):
                     maior_sim = 0.0
 
                     for fix in fixtures:
-                        api_home = fix["teams"]["home"]["name"]
-                        api_away = fix["teams"]["away"]["name"]
+                        api_home_raw = fix["teams"]["home"]["name"]
+                        api_away_raw = fix["teams"]["away"]["name"]
+                        
+                        api_home_clean = limpar_nome_time(api_home_raw)
+                        api_away_clean = limpar_nome_time(api_away_raw)
 
-                        sim_home = SequenceMatcher(None, home_team.lower(), api_home.lower()).ratio()
-                        sim_away = SequenceMatcher(None, away_team.lower(), api_away.lower()).ratio()
+                        sim_home = SequenceMatcher(None, home_clean, api_home_clean).ratio()
+                        sim_away = SequenceMatcher(None, away_clean, api_away_clean).ratio()
                         media_sim = (sim_home + sim_away) / 2
 
-                        if media_sim > maior_sim and media_sim > 0.40:
-                            maior_sim = media_sim
+                        # Também aceita se contencar parte do nome principal (ex: "Vrsac" em "OFK Vrsac")
+                        if home_clean in api_home_clean or api_home_clean in home_clean:
+                            sim_home = 0.9
+                        if away_clean in api_away_clean or api_away_clean in away_clean:
+                            sim_away = 0.9
+                        
+                        media_sim_flex = (sim_home + sim_away) / 2
+
+                        if media_sim_flex > maior_sim and media_sim_flex > 0.30:
+                            maior_sim = media_sim_flex
                             melhor_match = fix
 
                     if melhor_match:
                         status_short = melhor_match["fixture"]["status"]["short"]
                         elapsed = melhor_match["fixture"]["status"]["elapsed"]
-                        goals_home = melhor_match["goals"]["home"]
-                        goals_away = melhor_match["goals"]["home"] if "away" in melhor_match["goals"] else None
                         
-                        # Pegando os gols de forma segura
-                        g_home = melhor_match["goals"].get("home", 0)
-                        g_away = melhor_match["goals"].get("away", 0)
+                        g_home = melhor_match["goals"].get("home")
+                        g_away = melhor_match["goals"].get("away")
 
                         if g_home is None or g_away is None:
-                            return f"⏰ Não iniciado / Agendado ({status_short})"
+                            return f"⏰ Agendado / Não iniciado ({status_short})"
 
                         gols_str = f"{g_home} x {g_away}"
                         tempo_str = f"{elapsed}'" if elapsed else status_short
@@ -159,8 +176,8 @@ def obter_placar_api_football(nome_jogo):
                             pass
 
                         return f"⚽ {gols_str} ({tempo_str}){cantos_str}"
-        except Exception:
-            pass
+        except Exception as e:
+            return f"⚠️ Erro técnico: {e}"
 
     return "⏳ Aguardando atualização oficial..."
 
