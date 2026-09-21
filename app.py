@@ -549,7 +549,7 @@ elif aba == "4. Dashboard Financeiro":
 
             st.divider()
 
-            # --- NOVA SEÇÃO: DETALHAMENTO DIÁRIO GERAL ---
+            # --- DETALHAMENTO DIÁRIO GERAL ---
             st.subheader("📅 Desempenho Detalhado por Dia")
             
             diario_list = []
@@ -575,10 +575,9 @@ elif aba == "4. Dashboard Financeiro":
 
             st.divider()
 
-            # --- NOVA SEÇÃO: DETALHAMENTO DIÁRIO POR PROJETO / ESTRATÉGIA ---
+            # --- DETALHAMENTO DIÁRIO POR PROJETO / ESTRATÉGIA (CORRIGIDO) ---
             st.subheader("📁 Resultado Diário por Projeto / Estratégia")
             
-            # Tabela dinânica pivotada (Linha = Data, Colunas = Estratégia, Valores = Lucro)
             pivot_lucro = df_filtrado.pivot_table(
                 index='data_registro', 
                 columns='script_origem', 
@@ -587,9 +586,13 @@ elif aba == "4. Dashboard Financeiro":
                 fill_value=0.0
             )
             
-            # Formatar os valores da tabela com 'R$'
-            pivot_formated = pivot_lucro.applymap(lambda x: f"R$ {x:.2f}")
-            st.dataframe(pivot_formated, use_container_width=True)
+            # Utilizando a função map_format de forma segura e compatível com todas as versões do Pandas
+            pivot_display = pivot_lucro.reset_index()
+            for col in pivot_lucro.columns:
+                pivot_display[col] = pivot_display[col].apply(lambda x: f"R$ {x:.2f}")
+            pivot_display.rename(columns={'data_registro': 'Data'}, inplace=True)
+            
+            st.dataframe(pivot_display, use_container_width=True)
 
             st.divider()
 
