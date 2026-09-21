@@ -43,8 +43,13 @@ def init_db():
             permitir_feminino INTEGER DEFAULT 0
         )
     """)
-    # Inserir padrões padrão se tabela estiver vazia
-    scripts = ['Cantos (Over 9.5)', 'Gols (Over 2.5)', 'Vitória / Dominância']
+    # Projetos suportados na parametrização
+    scripts = [
+        'Cantos (Over 9.5)', 
+        'Gols (Over 2.5)', 
+        'Gols (Over 1.5)', 
+        'Vitória / Dominância'
+    ]
     for s in scripts:
         c.execute("INSERT OR IGNORE INTO configuracoes (script_nome, stake_padrao, top_n, permitir_copas, permitir_sub20, permitir_feminino) VALUES (?, 50.0, 10, 0, 0, 0)", (s,))
     conn.commit()
@@ -151,8 +156,8 @@ def processar_cantos(file, cfg):
         st.error(f"Erro ao processar arquivo de Cantos: {e}")
         return []
 
-# --- LÓGICA DO SCRIPT 2: GOLS ---
-def processar_gols(file, cfg):
+# --- LÓGICA DO SCRIPT 2: GOLS (TRATANDO OVER 2.5 E OVER 1.5 INDEPENDENTES) ---
+def processar_gols(file, cfg_over25, cfg_over15):
     try:
         try:
             df_raw = pd.read_csv(file, sep=None, engine='python', encoding='latin-1')
@@ -196,45 +201,68 @@ def processar_gols(file, cfg):
         df_s5['Barreira_Under'] = df_s5.iloc[:, 24]
 
         col_liga, col_casa, col_fora = df_s5.columns[2], df_s5.columns[5], df_s5.columns[8]
-        df_base = filtrar_blacklist(df_s5, col_liga, col_casa, col_fora, cfg)
-
-        df_ht = df_base[(df_base['Vol_HT'] >= 1.5) & (df_base['Total_Chutes_Proj'] >= 15.0) & (df_base['Chutes_Por_Gol'] >= 2.7)].copy()
-
-        score_ft = (((df_ht['Vol_FT'] / 2) / 3.5) * 100).clip(upper=100)       
-        score_pressao = ((df_ht['Total_Chutes_Proj'] / 20.0) * 100).clip(upper=100) 
-        score_freq = df_ht.iloc[:, 18:22].mean(axis=1)                           
-        score_hist = df_ht.iloc[:, 23]                                    
-
-        df_ht['Score_Elite'] = (score_ft * 0.25) + (score_pressao * 0.30) + (score_freq * 0.25) + (score_hist * 0.20)
-        df_score = df_ht[df_ht['Score_Elite'] >= 60.0].sort_values(by='Score_Elite', ascending=False).copy()
-
-        if cfg['top_n'] > 0:
-            df_score = df_score.head(cfg['top_n'])
-
-        mask_over25 = (df_score['Vol_FT'] >= 5.0) & (df_score['SideA_FT'] >= 2.5) & (df_score['SideB_FT'] >= 2.5) & (df_score['Barreira_Under'] < 42.0)
-        mask_over15 = (df_score['Vol_FT'] >= 5.0) & (df_score['Barreira_Under'] <= 50.0) & (~mask_over25)
 
         resultados = []
-        for _, r in df_score[mask_over25].iterrows():
-            hora_clean = str(r.iloc[3])[-5:]
-            resultados.append({
-                'hora': hora_clean,
-                'jogo': f"{fix_str(r.iloc[5])} vs {fix_str(r.iloc[8])}",
-                'liga': f"{fix_str(r.iloc[0])} - {fix_str(r.iloc[2])}",
-                'script': 'Gols (Over 2.5)',
-                'recomendacao': 'Over 2.5 Gols',
-                'odd': float(r.iloc[9])
-            })
-        for _, r in df_score[mask_over15].iterrows():
-            hora_clean = str(r.iloc[3])[-5:]
-            resultados.append({
-                'hora': hora_clean,
-                'jogo': f"{fix_str(r.iloc[5])} vs {fix_str(r.iloc[8])}",
-                'liga': f"{fix_str(r.iloc[0])} - {fix_str(r.iloc[2])}",
-                'script': 'Gols (Over 1.5)',
-                'recomendacao': 'Over 1.5 Gols',
-                'odd': float(r.iloc[9])
-            })
+
+        # --- APLICAR REGRAS OVER 2.5 ---
+        df_base_25 = filtrar_blacklist(df_s5, col_liga, col_casa, col_fora, cfg_over25)
+        df_ht_25 = df_base_25[(df_base_25['Vol_HT'] >= 1.5) & (df_base_25['Total_Chutes_Proj'] >= 15.0) & (df_base_25['Chutes_Por_Gol'] >= 2.7)].copy()
+        
+        if not df_ht_25.empty:
+            s_ft = (((df_ht_25['Vol_FT'] / 2) / 3.5) * 100).clip(upper=100)
+            s_press = ((df_ht_25['Total_Chutes_Proj'] / 20.0) * 100).clip(upper=100)
+            s_freq = df_ht_25.iloc[:, 18:22].mean(axis=1)
+            s_hist = df_ht_25.iloc[:, 23]
+            df_ht_25['Score_Elite'] = (s_ft * 0.25) + (s_press * 0.30) + (s_freq * 0.25) + (s_hist * 0.20)
+            
+            df_score_25 = df_ht_25[df_ht_25['Score_Elite'] >= 60.0].sort_values(by='Score_Elite', ascending=False).copy()
+            mask_over25 = (df_score_25['Vol_FT'] >= 5.0) & (df_score_25['SideA_FT'] >= 2.5) & (df_score_25['SideB_FT'] >= 2.5) & (df_score_25['Barreira_Under'] < 42.0)
+            
+            df_res_25 = df_score_25[mask_over25].copy()
+            if cfg_over25['top_n'] > 0:
+                df_res_25 = df_res_25.head(cfg_over25['top_n'])
+
+            for _, r in df_res_25.iterrows():
+                hora_clean = str(r.iloc[3])[-5:]
+                resultados.append({
+                    'hora': hora_clean,
+                    'jogo': f"{fix_str(r.iloc[5])} vs {fix_str(r.iloc[8])}",
+                    'liga': f"{fix_str(r.iloc[0])} - {fix_str(r.iloc[2])}",
+                    'script': 'Gols (Over 2.5)',
+                    'recomendacao': 'Over 2.5 Gols',
+                    'odd': float(r.iloc[9])
+                })
+
+        # --- APLICAR REGRAS OVER 1.5 ---
+        df_base_15 = filtrar_blacklist(df_s5, col_liga, col_casa, col_fora, cfg_over15)
+        df_ht_15 = df_base_15[(df_base_15['Vol_HT'] >= 1.5) & (df_base_15['Total_Chutes_Proj'] >= 15.0) & (df_base_15['Chutes_Por_Gol'] >= 2.7)].copy()
+
+        if not df_ht_15.empty:
+            s_ft = (((df_ht_15['Vol_FT'] / 2) / 3.5) * 100).clip(upper=100)
+            s_press = ((df_ht_15['Total_Chutes_Proj'] / 20.0) * 100).clip(upper=100)
+            s_freq = df_ht_15.iloc[:, 18:22].mean(axis=1)
+            s_hist = df_ht_15.iloc[:, 23]
+            df_ht_15['Score_Elite'] = (s_ft * 0.25) + (s_press * 0.30) + (s_freq * 0.25) + (s_hist * 0.20)
+            
+            df_score_15 = df_ht_15[df_ht_15['Score_Elite'] >= 60.0].sort_values(by='Score_Elite', ascending=False).copy()
+            mask_over25_check = (df_score_15['Vol_FT'] >= 5.0) & (df_score_15['SideA_FT'] >= 2.5) & (df_score_15['SideB_FT'] >= 2.5) & (df_score_15['Barreira_Under'] < 42.0)
+            mask_over15 = (df_score_15['Vol_FT'] >= 5.0) & (df_score_15['Barreira_Under'] <= 50.0) & (~mask_over25_check)
+
+            df_res_15 = df_score_15[mask_over15].copy()
+            if cfg_over15['top_n'] > 0:
+                df_res_15 = df_res_15.head(cfg_over15['top_n'])
+
+            for _, r in df_res_15.iterrows():
+                hora_clean = str(r.iloc[3])[-5:]
+                resultados.append({
+                    'hora': hora_clean,
+                    'jogo': f"{fix_str(r.iloc[5])} vs {fix_str(r.iloc[8])}",
+                    'liga': f"{fix_str(r.iloc[0])} - {fix_str(r.iloc[2])}",
+                    'script': 'Gols (Over 1.5)',
+                    'recomendacao': 'Over 1.5 Gols',
+                    'odd': float(r.iloc[9])
+                })
+
         return resultados
     except Exception as e:
         st.error(f"Erro ao processar arquivo de Gols: {e}")
@@ -360,16 +388,20 @@ if aba == "1. Análise de Arquivos":
     if st.button("🚀 Processar Oportunidades", use_container_width=True):
         todas_oportunidades = []
 
+        cfg_default = {'top_n': 10, 'permitir_copas': False, 'permitir_sub20': False, 'permitir_feminino': False}
+
         if f_cantos:
-            res = processar_cantos(f_cantos, configs_atuais.get('Cantos (Over 9.5)', {'top_n': 10, 'permitir_copas': False, 'permitir_sub20': False, 'permitir_feminino': False}))
+            res = processar_cantos(f_cantos, configs_atuais.get('Cantos (Over 9.5)', cfg_default))
             todas_oportunidades.extend(res)
 
         if f_gols:
-            res = processar_gols(f_gols, configs_atuais.get('Gols (Over 2.5)', {'top_n': 10, 'permitir_copas': False, 'permitir_sub20': False, 'permitir_feminino': False}))
+            cfg_g25 = configs_atuais.get('Gols (Over 2.5)', cfg_default)
+            cfg_g15 = configs_atuais.get('Gols (Over 1.5)', cfg_default)
+            res = processar_gols(f_gols, cfg_g25, cfg_g15)
             todas_oportunidades.extend(res)
 
         if f_win and f_conf:
-            res = processar_vitoria(f_win, f_conf, configs_atuais.get('Vitória / Dominância', {'top_n': 10, 'permitir_copas': False, 'permitir_sub20': False, 'permitir_feminino': False}))
+            res = processar_vitoria(f_win, f_conf, configs_atuais.get('Vitória / Dominância', cfg_default))
             todas_oportunidades.extend(res)
 
         if todas_oportunidades:
@@ -410,7 +442,6 @@ elif aba == "2. Gerenciar Entradas (Novas)":
         st.info("Nenhuma sugestão pendente no momento!")
     else:
         for estrategia, grupo in df_entradas.groupby('script_origem'):
-            # Buscar stake parametrizada para o projeto
             stake_padrao = configs_atuais.get(estrategia, {}).get('stake_padrao', 50.0)
             
             with st.expander(f"📁 {estrategia} ({len(grupo)} oportunidades)", expanded=False):
@@ -699,7 +730,7 @@ elif aba == "4. Dashboard Financeiro":
         conn.close()
 
 # ---------------------------------------------------------
-# ABA 5: PARÂMETROS & CONFIGURAÇÕES (NOVA ABA)
+# ABA 5: PARÂMETROS & CONFIGURAÇÕES (AGORA COM OVER 1.5 E OVER 2.5)
 # ---------------------------------------------------------
 elif aba == "5. Parâmetros & Configurações":
     st.header("⚙️ Parâmetros de Entrada por Projeto")
@@ -708,6 +739,7 @@ elif aba == "5. Parâmetros & Configurações":
     scripts_disponiveis = [
         'Cantos (Over 9.5)',
         'Gols (Over 2.5)',
+        'Gols (Over 1.5)',
         'Vitória / Dominância'
     ]
 
