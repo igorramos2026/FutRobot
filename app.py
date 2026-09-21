@@ -690,10 +690,10 @@ elif aba == "4. Dashboard Financeiro":
             dias_map = {0: 'Segunda-feira', 1: 'Terça-feira', 2: 'Quarta-feira', 3: 'Quinta-feira', 4: 'Sexta-feira', 5: 'Sábado', 6: 'Domingo'}
             ordem_dias = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
             
-            df_filtrado['Dia_Semana'] = pd.to_datetime(df_filtrado['data_registro']).dt.dayofweek.map(dias_map)
+            df_filtrado['Dia da Semana'] = pd.to_datetime(df_filtrado['data_registro']).dt.dayofweek.map(dias_map)
             
             semana_perf = []
-            for dia, group in df_filtrado.groupby('Dia_Semana'):
+            for dia, group in df_filtrado.groupby('Dia da Semana'):
                 tot_d = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
                 g_d = len(group[group['status'].str.strip().str.title() == 'Green'])
                 r_d = len(group[group['status'].str.strip().str.title() == 'Red'])
@@ -713,7 +713,7 @@ elif aba == "4. Dashboard Financeiro":
                 })
             df_semana_perf = pd.DataFrame(semana_perf)
             if not df_semana_perf.empty:
-                df_semana_perf['ordem'] = df_semana_perf['Dia_Semana'].map(lambda x: ordem_dias.index(x) if x in ordem_dias else 99)
+                df_semana_perf['ordem'] = df_semana_perf['Dia da Semana'].map(lambda x: ordem_dias.index(x) if x in ordem_dias else 99)
                 df_semana_perf = df_semana_perf.sort_values('ordem').drop(columns='ordem')
                 
                 st.dataframe(
