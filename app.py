@@ -72,7 +72,7 @@ def init_db():
 
 init_db()
 
-# --- INTEGRAÇÃO COM API-FOOTBALL & FALLBACK ---
+# --- INTEGRAÇÃO COM API-FOOTBALL (DADOS LIMPOS) ---
 def carregar_api_key():
     conn = sqlite3.connect("oportunidades.db")
     c = conn.cursor()
@@ -86,7 +86,6 @@ def carregar_api_key():
 def obter_placar_api_football(nome_jogo):
     api_key = carregar_api_key()
     
-    # 1. TENTATIVA VIA API-FOOTBALL
     if api_key and len(api_key.strip()) > 10:
         try:
             parts = nome_jogo.split(" vs ")
@@ -125,12 +124,19 @@ def obter_placar_api_football(nome_jogo):
                         status_short = melhor_match["fixture"]["status"]["short"]
                         elapsed = melhor_match["fixture"]["status"]["elapsed"]
                         goals_home = melhor_match["goals"]["home"]
-                        goals_away = melhor_match["goals"]["away"]
+                        goals_away = melhor_match["goals"]["home"] if "away" in melhor_match["goals"] else None
+                        
+                        # Pegando os gols de forma segura
+                        g_home = melhor_match["goals"].get("home", 0)
+                        g_away = melhor_match["goals"].get("away", 0)
 
-                        gols_str = f"{goals_home if goals_home is not None else 0} x {goals_away if goals_away is not None else 0}"
+                        if g_home is None or g_away is None:
+                            return f"⏰ Não iniciado / Agendado ({status_short})"
+
+                        gols_str = f"{g_home} x {g_away}"
                         tempo_str = f"{elapsed}'" if elapsed else status_short
 
-                        # Tentar obter estatísticas de escanteios se disponível
+                        # Tentar escanteios com segurança
                         fixture_id = melhor_match["fixture"]["id"]
                         cantos_str = ""
                         try:
@@ -156,22 +162,7 @@ def obter_placar_api_football(nome_jogo):
         except Exception:
             pass
 
-    # 2. FALLBACK AUTOMÁTICO (Caso a API dê 403 ou falhe)
-    try:
-        query = f"{nome_jogo} placar ao vivo flashscore"
-        url_search = f"https://www.google.com/search?q={requests.utils.quote(query)}&hl=pt-BR"
-        headers_web = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-        }
-        res_web = requests.get(url_search, headers=headers_web, timeout=5)
-        if res_web.status_code == 200:
-            match = re.search(r'(\d+)\s*[-xX–]\s*(\d+)', res_web.text)
-            if match:
-                return f"⚽ {match.group(1)} x {match.group(2)} (Em Andamento)"
-    except Exception:
-        pass
-
-    return "⚠️ Jogo não localizado no momento"
+    return "⏳ Aguardando atualização oficial..."
 
 # --- AUXILIARES DE PARÂMETROS E TRATAMENTO DE TEXTO ---
 def carregar_configuracoes():
