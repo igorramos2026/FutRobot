@@ -644,7 +644,7 @@ elif aba == "4. Dashboard Financeiro":
 
             st.divider()
 
-            # --- NOVA SEÇÃO: ANÁLISE POR FAIXA DE ODD ---
+            # --- SEÇÃO: ANÁLISE POR FAIXA DE ODD ---
             st.subheader("🎯 Desempenho por Faixa de Odd")
             bins = [1.0, 1.5, 1.75, 2.0, 2.5, 50.0]
             labels = ['Até 1.50', '1.51 - 1.75', '1.76 - 2.00', '2.01 - 2.50', 'Acima de 2.50']
@@ -677,7 +677,7 @@ elif aba == "4. Dashboard Financeiro":
                         'Investimento (R\()': 'R\) {:.2f}',
                         'Lucro Líquido (R\()': 'R\) {:.2f}',
                         'ROI (%)': '{:.1f}%'
-                    }).applymap(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
+                    }).map(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
                     use_container_width=True
                 )
             else:
@@ -685,7 +685,7 @@ elif aba == "4. Dashboard Financeiro":
 
             st.divider()
 
-            # --- NOVA SEÇÃO: ANÁLISE POR DIA DA SEMANA ---
+            # --- SEÇÃO: ANÁLISE POR DIA DA SEMANA ---
             st.subheader("📅 Desempenho por Dia da Semana")
             dias_map = {0: 'Segunda-feira', 1: 'Terça-feira', 2: 'Quarta-feira', 3: 'Quinta-feira', 4: 'Sexta-feira', 5: 'Sábado', 6: 'Domingo'}
             ordem_dias = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
@@ -721,7 +721,7 @@ elif aba == "4. Dashboard Financeiro":
                         'Investimento (R\()': 'R\) {:.2f}',
                         'Lucro Líquido (R\()': 'R\) {:.2f}',
                         'ROI (%)': '{:.1f}%'
-                    }).applymap(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
+                    }).map(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
                     use_container_width=True
                 )
             else:
@@ -758,7 +758,7 @@ elif aba == "4. Dashboard Financeiro":
                         'Investimento (R\()': 'R\) {:.2f}',
                         'Lucro do Dia (R\()': 'R\) {:.2f}',
                         'ROI (%)': '{:.1f}%'
-                    }).applymap(colorir_lucro, subset=['Lucro do Dia (R$)', 'ROI (%)']),
+                    }).map(colorir_lucro, subset=['Lucro do Dia (R$)', 'ROI (%)']),
                     use_container_width=True
                 )
 
@@ -783,7 +783,7 @@ elif aba == "4. Dashboard Financeiro":
                 cols_num_proj = [c for c in pivot_lucro.columns if c != 'Data']
                 st.dataframe(
                     pivot_lucro.style.format({c: 'R$ {:.2f}' for c in cols_num_proj})
-                    .applymap(colorir_lucro, subset=cols_num_proj),
+                    .map(colorir_lucro, subset=cols_num_proj),
                     use_container_width=True
                 )
             else:
@@ -819,7 +819,7 @@ elif aba == "4. Dashboard Financeiro":
                         'Investimento (R\()': 'R\) {:.2f}',
                         'Lucro Líquido (R\()': 'R\) {:.2f}',
                         'ROI (%)': '{:.1f}%'
-                    }).applymap(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
+                    }).map(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
                     use_container_width=True
                 )
 
@@ -866,7 +866,7 @@ elif aba == "4. Dashboard Financeiro":
                     'odd_comprada': '{:.2f}',
                     'valor_apostado': 'R$ {:.2f}',
                     'lucro_prejuizo': 'R$ {:.2f}'
-                }).applymap(colorir_lucro, subset=['lucro_prejuizo']),
+                }).map(colorir_lucro, subset=['lucro_prejuizo']),
                 use_container_width=True
             )
         conn.close()
@@ -904,7 +904,7 @@ elif aba == "5. Parâmetros & Configurações":
             with col_cfg2:
                 st.write("**Filtros de Ligas Aceitas:**")
                 perm_copas = st.checkbox("Incluir Copas e Torneios Eliminatórios", value=bool(cfg['permitir_copas']), key=f"cfg_copas_{script}")
-                perm_sub20 = st.checkbox("Incluir Ligas Sub-20 / Sub-23 / Formação", value=bool(cfg['permitir_sub20']), key=f"cfg_sub_{script}")
+                perm_sub20 = st.checkbox("Incluir Ligas Sub-20 / Sub-23 / Formação", value=bool(cfg['permitir_sub20']), key=f}cfg_sub_{script}")
                 perm_fem = st.checkbox("Incluir Jogos de Futebol Feminino", value=bool(cfg['permitir_feminino']), key=f"cfg_fem_{script}")
 
             if st.button(f"💾 Salvar Parâmetros para {script}", key=f"btn_save_cfg_{script}", use_container_width=True):
