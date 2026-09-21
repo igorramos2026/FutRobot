@@ -904,7 +904,7 @@ elif aba == "5. Parâmetros & Configurações":
             with col_cfg2:
                 st.write("**Filtros de Ligas Aceitas:**")
                 perm_copas = st.checkbox("Incluir Copas e Torneios Eliminatórios", value=bool(cfg['permitir_copas']), key=f"cfg_copas_{script}")
-                perm_sub20 = st.checkbox("Incluir Ligas Sub-20 / Sub-23 / Formação", value=bool(cfg['permitir_sub20']), key=f}cfg_sub_{script}")
+                perm_sub20 = st.checkbox("Incluir Ligas Sub-20 / Sub-23 / Formação", value=bool(cfg['permitir_sub20']), key=f"cfg_sub_{script}")
                 perm_fem = st.checkbox("Incluir Jogos de Futebol Feminino", value=bool(cfg['permitir_feminino']), key=f"cfg_fem_{script}")
 
             if st.button(f"💾 Salvar Parâmetros para {script}", key=f"btn_save_cfg_{script}", use_container_width=True):
