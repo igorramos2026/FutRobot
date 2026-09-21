@@ -1,12 +1,10 @@
 import os
 import re
-import urllib.parse
 import sqlite3
 import numpy as np
 import pandas as pd
 import streamlit as st
 import requests
-from bs4 import BeautifulSoup
 from difflib import SequenceMatcher
 from datetime import datetime, date
 
@@ -39,7 +37,6 @@ def init_db():
         )
     """)
     
-    # Atualização de schema para bancos antigos que não possuem placar_ao_vivo
     c.execute("PRAGMA table_info(entradas)")
     cols = [col[1] for col in c.fetchall()]
     if 'placar_ao_vivo' not in cols:
@@ -52,9 +49,16 @@ def init_db():
             top_n INTEGER DEFAULT 10,
             permitir_copas INTEGER DEFAULT 0,
             permitir_sub20 INTEGER DEFAULT 0,
-            permitir_feminino INTEGER DEFAULT 0
+            permitir_feminino INTEGER DEFAULT 0,
+            api_key TEXT DEFAULT '0643621bd1msh310745680e8ac73p10a756jsn4dff9e95dfcf'
         )
     """)
+    
+    c.execute("PRAGMA table_info(configuracoes)")
+    cfg_cols = [col[1] for col in c.fetchall()]
+    if 'api_key' not in cfg_cols:
+        c.execute("ALTER TABLE configuracoes ADD COLUMN api_key TEXT DEFAULT '0643621bd1msh310745680e8ac73p10a756jsn4dff9e95dfcf'")
+
     scripts = [
         'Cantos (Over 9.5)', 
         'Gols (Over 2.5)', 
@@ -62,39 +66,104 @@ def init_db():
         'Vitória / Dominância'
     ]
     for s in scripts:
-        c.execute("INSERT OR IGNORE INTO configuracoes (script_nome, stake_padrao, top_n, permitir_copas, permitir_sub20, permitir_feminino) VALUES (?, 50.0, 10, 0, 0, 0)", (s,))
+        c.execute("INSERT OR IGNORE INTO configuracoes (script_nome, stake_padrao, top_n, permitir_copas, permitir_sub20, permitir_feminino, api_key) VALUES (?, 50.0, 10, 0, 0, 0, '0643621bd1msh310745680e8ac73p10a756jsn4dff9e95dfcf')", (s,))
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- FUNÇÃO DE BUSCA DE PLACAR AO VIVO (SCRAPING GRATUITO) ---
-def obter_placar_ao_vivo(nome_jogo):
-    try:
-        query = f"{nome_jogo} placar ao vivo flashscore"
-        url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&hl=pt-BR"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-        }
-        res = requests.get(url, headers=headers, timeout=5)
-        if res.status_code == 200:
-            soup = BeautifulSoup(res.text, 'html.parser')
-            
-            # Tentar extrair snippet de placar do Google
-            score_cards = soup.find_all(['div', 'span'], text=re.compile(r'\d+\s*[-xX–]\s*\d+'))
-            for sc in score_cards:
-                text = sc.get_text().strip()
-                if len(text) < 30 and re.search(r'\d+\s*[-xX–]\s*\d+', text):
-                    return text
+# --- INTEGRAÇÃO COM API-FOOTBALL ---
+def carregar_api_key():
+    conn = sqlite3.connect("oportunidades.db")
+    c = conn.cursor()
+    c.execute("SELECT api_key FROM configuracoes LIMIT 1")
+    res = c.fetchone()
+    conn.close()
+    if res and res[0]:
+        return res[0]
+    return "0643621bd1msh310745680e8ac73p10a756jsn4dff9e95dfcf"
 
-            # Busca genérica por padrões no texto da página
-            match = re.search(r'(\d+)\s*[-xX–]\s*(\d+)', soup.get_text())
-            if match:
-                return f"{match.group(1)} - {match.group(2)} (Em Andamento/Finalizado)"
+def obter_placar_api_football(nome_jogo):
+    api_key = carregar_api_key()
+    if not api_key:
+        return "⚠️ Chave API não configurada"
+
+    try:
+        parts = nome_jogo.split(" vs ")
+        if len(parts) < 2:
+            return "⚠️ Nome de jogo inválido"
+        home_team, away_team = parts[0].strip(), parts[1].strip()
+
+        url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
+        hoje = date.today().isoformat()
+        headers = {
+            "X-RapidAPI-Key": api_key,
+            "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+        }
+        params = {"date": hoje}
+
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        if response.status_code != 200:
+            return f"⚠️ Erro na API ({response.status_code})"
+
+        data = response.json()
+        fixtures = data.get("response", [])
+
+        if not fixtures:
+            return "⚠️ Nenhum jogo localizado hoje"
+
+        melhor_match = None
+        maior_sim = 0.0
+
+        for fix in fixtures:
+            api_home = fix["teams"]["home"]["name"]
+            api_away = fix["teams"]["away"]["name"]
+
+            sim_home = SequenceMatcher(None, home_team.lower(), api_home.lower()).ratio()
+            sim_away = SequenceMatcher(None, away_team.lower(), api_away.lower()).ratio()
+            media_sim = (sim_home + sim_away) / 2
+
+            if media_sim > maior_sim and media_sim > 0.45:
+                maior_sim = media_sim
+                melhor_match = fix
+
+        if melhor_match:
+            status_short = melhor_match["fixture"]["status"]["short"]
+            elapsed = melhor_match["fixture"]["status"]["elapsed"]
+            goals_home = melhor_match["goals"]["home"]
+            goals_away = melhor_match["goals"]["away"]
+
+            gols_str = f"{goals_home if goals_home is not None else 0} x {goals_away if goals_away is not None else 0}"
+            tempo_str = f"{elapsed}'" if elapsed else status_short
+
+            # Tentar obter estatísticas de escanteios
+            fixture_id = melhor_match["fixture"]["id"]
+            cantos_str = "Cantos: N/A"
             
-        return "⚠️ Placar não localizado no momento"
-    except Exception:
-        return "⚠️ Erro na consulta do placar"
+            try:
+                url_stats = "https://api-football-v1.p.rapidapi.com/v3/fixtures/statistics"
+                res_stats = requests.get(url_stats, headers=headers, params={"fixture": fixture_id}, timeout=5)
+                if res_stats.status_code == 200:
+                    stats_data = res_stats.json().get("response", [])
+                    tot_cantos = 0
+                    encontrou = False
+                    for team_stat in stats_data:
+                        for item in team_stat.get("statistics", []):
+                            if item.get("type") == "Corner Kicks":
+                                val = item.get("value")
+                                if val is not None:
+                                    tot_cantos += int(val)
+                                    encontrou = True
+                    if encontrou:
+                        cantos_str = f"🚩 Cantos: {tot_cantos}"
+            except Exception:
+                pass
+
+            return f"⚽ {gols_str} ({tempo_str}) | {cantos_str}"
+
+        return "⚠️ Jogo não encontrado na API"
+    except Exception as e:
+        return f"⚠️ Erro ao consultar: {e}"
 
 # --- AUXILIARES DE PARÂMETROS E TRATAMENTO DE TEXTO ---
 def carregar_configuracoes():
@@ -108,7 +177,8 @@ def carregar_configuracoes():
             'top_n': int(row['top_n']),
             'permitir_copas': bool(row['permitir_copas']),
             'permitir_sub20': bool(row['permitir_sub20']),
-            'permitir_feminino': bool(row['permitir_feminino'])
+            'permitir_feminino': bool(row['permitir_feminino']),
+            'api_key': str(row.get('api_key', '0643621bd1msh310745680e8ac73p10a756jsn4dff9e95dfcf'))
         }
     return configs
 
@@ -466,7 +536,7 @@ if aba == "1. Análise de Arquivos":
             st.success("✅ Oportunidades enviadas com sucesso! Acesse a aba '2. Gerenciar Entradas' para acompanhar.")
 
 # ---------------------------------------------------------
-# ABA 2: GERENCIAR ENTRADAS NOVAS (COM PLACAR AO VIVO)
+# ABA 2: GERENCIAR ENTRADAS NOVAS (COM API-FOOTBALL)
 # ---------------------------------------------------------
 elif aba == "2. Gerenciar Entradas (Novas)":
     st.header("🎯 Sugestões Pendentes por Estratégia")
@@ -476,11 +546,11 @@ elif aba == "2. Gerenciar Entradas (Novas)":
     df_entradas = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'pendente' ORDER BY script_origem ASC, hora ASC", conn)
 
     if not df_entradas.empty:
-        if st.button("🔄 Atualizar Placares Ao Vivo", key="btn_update_pend", use_container_width=True):
-            with st.spinner("Consultando placares dos jogos no Google/Flashscore..."):
+        if st.button("🔄 Atualizar Placares Ao Vivo (API-Football)", key="btn_update_pend", use_container_width=True):
+            with st.spinner("Consultando dados oficiais dos jogos em tempo real..."):
                 c = conn.cursor()
                 for _, r_p in df_entradas.iterrows():
-                    placar = obter_placar_ao_vivo(r_p['jogo'])
+                    placar = obter_placar_api_football(r_p['jogo'])
                     c.execute("UPDATE entradas SET placar_ao_vivo = ? WHERE id = ?", (placar, r_p['id']))
                 conn.commit()
                 st.toast("Placares atualizados!")
@@ -496,7 +566,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
                 for idx, row in grupo.iterrows():
                     placar_str = row.get('placar_ao_vivo', 'Não consultado')
                     st.markdown(f"##### ⏰ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
-                    st.caption(f"📺 **Placar Ao Vivo / Status:** {placar_str}")
+                    st.caption(f"📺 **Status em Tempo Real:** {placar_str}")
                     
                     col_info, col_inputs, col_botoes = st.columns([2.5, 2.5, 1.5])
 
@@ -535,7 +605,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
     conn.close()
 
 # ---------------------------------------------------------
-# ABA 3: APOSTAS EM ANDAMENTO (COM PLACAR AO VIVO)
+# ABA 3: APOSTAS EM ANDAMENTO (COM API-FOOTBALL)
 # ---------------------------------------------------------
 elif aba == "3. Apostas em Andamento":
     st.header("⏳ Apostas Confirmadas (Aguardando Resultado)")
@@ -544,14 +614,14 @@ elif aba == "3. Apostas em Andamento":
     df_andamento = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'em andamento' ORDER BY script_origem ASC, hora ASC", conn)
 
     if not df_andamento.empty:
-        if st.button("🔄 Atualizar Placares Ao Vivo", key="btn_update_and", use_container_width=True):
-            with st.spinner("Consultando placares dos jogos no Google/Flashscore..."):
+        if st.button("🔄 Atualizar Placares Ao Vivo (API-Football)", key="btn_update_and", use_container_width=True):
+            with st.spinner("Consultando dados oficiais dos jogos em tempo real..."):
                 c = conn.cursor()
                 for _, r_a in df_andamento.iterrows():
-                    placar = obter_placar_ao_vivo(r_a['jogo'])
+                    placar = obter_placar_api_football(r_a['jogo'])
                     c.execute("UPDATE entradas SET placar_ao_vivo = ? WHERE id = ?", (placar, r_a['id']))
                 conn.commit()
-                st.toast("Placares das apostas ativas atualizados!")
+                st.toast("Placares atualizados!")
                 st.rerun()
 
     if df_andamento.empty:
@@ -562,7 +632,7 @@ elif aba == "3. Apostas em Andamento":
                 for idx, row in grupo.iterrows():
                     placar_str = row.get('placar_ao_vivo', 'Não consultado')
                     st.markdown(f"##### ⚽ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
-                    st.caption(f"📺 **Placar Ao Vivo / Status:** {placar_str}")
+                    st.caption(f"📺 **Status em Tempo Real:** {placar_str}")
                     
                     col_info, col_botoes = st.columns([3, 2])
 
@@ -798,8 +868,23 @@ elif aba == "4. Dashboard Financeiro":
 # ABA 5: PARÂMETROS & CONFIGURAÇÕES
 # ---------------------------------------------------------
 elif aba == "5. Parâmetros & Configurações":
-    st.header("⚙️ Parâmetros de Entrada por Projeto")
-    st.write("Ajuste as regras de filtragem, limite de recomendações e stake fixa padrão para cada estratégia.")
+    st.header("⚙️ Parâmetros de Entrada e Integrações")
+    st.write("Ajuste as regras de filtragem, limite de recomendações, stake fixa padrão e chave da API-Football.")
+
+    api_key_atual = carregar_api_key()
+    
+    with st.expander("🔑 Configuração da API-Football (RapidAPI)", expanded=True):
+        nova_key = st.text_input("Chave X-RapidAPI-Key:", value=api_key_atual, type="password")
+        if st.button("💾 Salvar Chave API", use_container_width=True):
+            conn = sqlite3.connect("oportunidades.db")
+            c = conn.cursor()
+            c.execute("UPDATE configuracoes SET api_key = ?", (nova_key,))
+            conn.commit()
+            conn.close()
+            st.toast("Chave API salva com sucesso!")
+            st.rerun()
+
+    st.divider()
 
     scripts_disponiveis = [
         'Cantos (Over 9.5)',
@@ -817,7 +902,7 @@ elif aba == "5. Parâmetros & Configurações":
             'permitir_feminino': False
         })
 
-        with st.expander(f"🛠️ Parâmetros do Projeto: {script}", expanded=True):
+        with st.expander(f"🛠️ Parâmetros do Projeto: {script}", expanded=False):
             col_cfg1, col_cfg2 = st.columns(2)
 
             with col_cfg1:
@@ -834,10 +919,10 @@ elif aba == "5. Parâmetros & Configurações":
                 conn = sqlite3.connect("oportunidades.db")
                 c = conn.cursor()
                 sql_save_cfg = """
-                    INSERT OR REPLACE INTO configuracoes (script_nome, stake_padrao, top_n, permitir_copas, permitir_sub20, permitir_feminino)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO configuracoes (script_nome, stake_padrao, top_n, permitir_copas, permitir_sub20, permitir_feminino, api_key)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """
-                c.execute(sql_save_cfg, (script, nova_stake, novo_top_n, int(perm_copas), int(perm_sub20), int(perm_fem)))
+                c.execute(sql_save_cfg, (script, nova_stake, novo_top_n, int(perm_copas), int(perm_sub20), int(perm_fem), nova_key if 'nova_key' in locals() else api_key_atual))
                 conn.commit()
                 conn.close()
                 st.toast(f"Parâmetros de '{script}' atualizados com sucesso!")
