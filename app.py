@@ -1,9 +1,13 @@
 import os
 import re
+import urllib.parse
 import sqlite3
 import numpy as np
 import pandas as pd
 import streamlit as st
+import requests
+from bs4 import BeautifulSoup
+from difflib import SequenceMatcher
 from datetime import datetime, date
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
@@ -30,9 +34,17 @@ def init_db():
             odd_comprada REAL DEFAULT 0.0,
             valor_apostado REAL DEFAULT 0.0,
             lucro_prejuizo REAL DEFAULT 0.0,
-            status TEXT DEFAULT 'Pendente'
+            status TEXT DEFAULT 'Pendente',
+            placar_ao_vivo TEXT DEFAULT 'Não consultado'
         )
     """)
+    
+    # Atualização de schema para bancos antigos que não possuem placar_ao_vivo
+    c.execute("PRAGMA table_info(entradas)")
+    cols = [col[1] for col in c.fetchall()]
+    if 'placar_ao_vivo' not in cols:
+        c.execute("ALTER TABLE entradas ADD COLUMN placar_ao_vivo TEXT DEFAULT 'Não consultado'")
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS configuracoes (
             script_nome TEXT PRIMARY KEY,
@@ -43,7 +55,6 @@ def init_db():
             permitir_feminino INTEGER DEFAULT 0
         )
     """)
-    # Projetos suportados na parametrização
     scripts = [
         'Cantos (Over 9.5)', 
         'Gols (Over 2.5)', 
@@ -56,6 +67,34 @@ def init_db():
     conn.close()
 
 init_db()
+
+# --- FUNÇÃO DE BUSCA DE PLACAR AO VIVO (SCRAPING GRATUITO) ---
+def obter_placar_ao_vivo(nome_jogo):
+    try:
+        query = f"{nome_jogo} placar ao vivo flashscore"
+        url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&hl=pt-BR"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+        }
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            # Tentar extrair snippet de placar do Google
+            score_cards = soup.find_all(['div', 'span'], text=re.compile(r'\d+\s*[-xX–]\s*\d+'))
+            for sc in score_cards:
+                text = sc.get_text().strip()
+                if len(text) < 30 and re.search(r'\d+\s*[-xX–]\s*\d+', text):
+                    return text
+
+            # Busca genérica por padrões no texto da página
+            match = re.search(r'(\d+)\s*[-xX–]\s*(\d+)', soup.get_text())
+            if match:
+                return f"{match.group(1)} - {match.group(2)} (Em Andamento/Finalizado)"
+            
+        return "⚠️ Placar não localizado no momento"
+    except Exception:
+        return "⚠️ Erro na consulta do placar"
 
 # --- AUXILIARES DE PARÂMETROS E TRATAMENTO DE TEXTO ---
 def carregar_configuracoes():
@@ -156,7 +195,7 @@ def processar_cantos(file, cfg):
         st.error(f"Erro ao processar arquivo de Cantos: {e}")
         return []
 
-# --- LÓGICA DO SCRIPT 2: GOLS (TRATANDO OVER 2.5 E OVER 1.5 INDEPENDENTES) ---
+# --- LÓGICA DO SCRIPT 2: GOLS ---
 def processar_gols(file, cfg_over25, cfg_over15):
     try:
         try:
@@ -201,10 +240,9 @@ def processar_gols(file, cfg_over25, cfg_over15):
         df_s5['Barreira_Under'] = df_s5.iloc[:, 24]
 
         col_liga, col_casa, col_fora = df_s5.columns[2], df_s5.columns[5], df_s5.columns[8]
-
         resultados = []
 
-        # --- APLICAR REGRAS OVER 2.5 ---
+        # OVER 2.5
         df_base_25 = filtrar_blacklist(df_s5, col_liga, col_casa, col_fora, cfg_over25)
         df_ht_25 = df_base_25[(df_base_25['Vol_HT'] >= 1.5) & (df_base_25['Total_Chutes_Proj'] >= 15.0) & (df_base_25['Chutes_Por_Gol'] >= 2.7)].copy()
         
@@ -233,7 +271,7 @@ def processar_gols(file, cfg_over25, cfg_over15):
                     'odd': float(r.iloc[9])
                 })
 
-        # --- APLICAR REGRAS OVER 1.5 ---
+        # OVER 1.5
         df_base_15 = filtrar_blacklist(df_s5, col_liga, col_casa, col_fora, cfg_over15)
         df_ht_15 = df_base_15[(df_base_15['Vol_HT'] >= 1.5) & (df_base_15['Total_Chutes_Proj'] >= 15.0) & (df_base_15['Chutes_Por_Gol'] >= 2.7)].copy()
 
@@ -387,7 +425,6 @@ if aba == "1. Análise de Arquivos":
 
     if st.button("🚀 Processar Oportunidades", use_container_width=True):
         todas_oportunidades = []
-
         cfg_default = {'top_n': 10, 'permitir_copas': False, 'permitir_sub20': False, 'permitir_feminino': False}
 
         if f_cantos:
@@ -429,7 +466,7 @@ if aba == "1. Análise de Arquivos":
             st.success("✅ Oportunidades enviadas com sucesso! Acesse a aba '2. Gerenciar Entradas' para acompanhar.")
 
 # ---------------------------------------------------------
-# ABA 2: GERENCIAR ENTRADAS NOVAS (CONFIRMAR OU DESCARTAR)
+# ABA 2: GERENCIAR ENTRADAS NOVAS (COM PLACAR AO VIVO)
 # ---------------------------------------------------------
 elif aba == "2. Gerenciar Entradas (Novas)":
     st.header("🎯 Sugestões Pendentes por Estratégia")
@@ -438,15 +475,29 @@ elif aba == "2. Gerenciar Entradas (Novas)":
     conn = sqlite3.connect("oportunidades.db")
     df_entradas = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'pendente' ORDER BY script_origem ASC, hora ASC", conn)
 
+    if not df_entradas.empty:
+        if st.button("🔄 Atualizar Placares Ao Vivo", key="btn_update_pend", use_container_width=True):
+            with st.spinner("Consultando placares dos jogos no Google/Flashscore..."):
+                c = conn.cursor()
+                for _, r_p in df_entradas.iterrows():
+                    placar = obter_placar_ao_vivo(r_p['jogo'])
+                    c.execute("UPDATE entradas SET placar_ao_vivo = ? WHERE id = ?", (placar, r_p['id']))
+                conn.commit()
+                st.toast("Placares atualizados!")
+                st.rerun()
+
     if df_entradas.empty:
         st.info("Nenhuma sugestão pendente no momento!")
     else:
         for estrategia, grupo in df_entradas.groupby('script_origem'):
             stake_padrao = configs_atuais.get(estrategia, {}).get('stake_padrao', 50.0)
             
-            with st.expander(f"📁 {estrategia} ({len(grupo)} oportunidades)", expanded=False):
+            with st.expander(f"📁 {estrategia} ({len(grupo)} oportunidades)", expanded=True):
                 for idx, row in grupo.iterrows():
+                    placar_str = row.get('placar_ao_vivo', 'Não consultado')
                     st.markdown(f"##### ⏰ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
+                    st.caption(f"📺 **Placar Ao Vivo / Status:** {placar_str}")
+                    
                     col_info, col_inputs, col_botoes = st.columns([2.5, 2.5, 1.5])
 
                     with col_info:
@@ -484,7 +535,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
     conn.close()
 
 # ---------------------------------------------------------
-# ABA 3: APOSTAS EM ANDAMENTO (AGUARDANDO GREEN/RED)
+# ABA 3: APOSTAS EM ANDAMENTO (COM PLACAR AO VIVO)
 # ---------------------------------------------------------
 elif aba == "3. Apostas em Andamento":
     st.header("⏳ Apostas Confirmadas (Aguardando Resultado)")
@@ -492,13 +543,27 @@ elif aba == "3. Apostas em Andamento":
     conn = sqlite3.connect("oportunidades.db")
     df_andamento = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'em andamento' ORDER BY script_origem ASC, hora ASC", conn)
 
+    if not df_andamento.empty:
+        if st.button("🔄 Atualizar Placares Ao Vivo", key="btn_update_and", use_container_width=True):
+            with st.spinner("Consultando placares dos jogos no Google/Flashscore..."):
+                c = conn.cursor()
+                for _, r_a in df_andamento.iterrows():
+                    placar = obter_placar_ao_vivo(r_a['jogo'])
+                    c.execute("UPDATE entradas SET placar_ao_vivo = ? WHERE id = ?", (placar, r_a['id']))
+                conn.commit()
+                st.toast("Placares das apostas ativas atualizados!")
+                st.rerun()
+
     if df_andamento.empty:
         st.info("Nenhuma aposta em andamento no momento!")
     else:
         for estrategia, grupo in df_andamento.groupby('script_origem'):
             with st.expander(f"📁 {estrategia} ({len(grupo)} apostas ativas)", expanded=True):
                 for idx, row in grupo.iterrows():
+                    placar_str = row.get('placar_ao_vivo', 'Não consultado')
                     st.markdown(f"##### ⚽ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
+                    st.caption(f"📺 **Placar Ao Vivo / Status:** {placar_str}")
+                    
                     col_info, col_botoes = st.columns([3, 2])
 
                     with col_info:
@@ -730,7 +795,7 @@ elif aba == "4. Dashboard Financeiro":
         conn.close()
 
 # ---------------------------------------------------------
-# ABA 5: PARÂMETROS & CONFIGURAÇÕES (AGORA COM OVER 1.5 E OVER 2.5)
+# ABA 5: PARÂMETROS & CONFIGURAÇÕES
 # ---------------------------------------------------------
 elif aba == "5. Parâmetros & Configurações":
     st.header("⚙️ Parâmetros de Entrada por Projeto")
