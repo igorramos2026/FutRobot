@@ -135,16 +135,19 @@ def processar_cantos(file, cfg):
     ]
     try:
         df = pd.read_csv(file, sep=';', names=CORRECT_COL_NAMES, skiprows=1, encoding='latin-1')
-        mask_error = df.isin([-1, -1.0, '-1', '-1.0', ' -1'])
-        df = df[~mask_error.any(axis=1)].copy()
-
+        
+        # Desconsidera imediatamente qualquer jogo com erro (-1) ou dado faltando
         numeric_cols = CORRECT_COL_NAMES[9:]
         for col in numeric_cols:
             if df[col].dtype == object:
                 df[col] = df[col].astype(str).str.replace('%', '', regex=False).str.replace(',', '.', regex=False)
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # Elimina dados faltantes ou códigos de erro (-1)
         df = df.dropna(subset=numeric_cols).copy()
+        mask_error = (df[numeric_cols] == -1) | (df[numeric_cols] == -1.0)
+        df = df[~mask_error.any(axis=1)].copy()
+
         df = filtrar_blacklist(df, 'League', 'Home', 'Away', cfg)
 
         df['xCorners_Home'] = (df['Corners_Pro_Home'] * 0.60) + (df['Corners_Con_Away'] * 0.40)
@@ -199,7 +202,8 @@ def processar_gols(file, cfg_over25, cfg_over15):
                 .apply(pd.to_numeric, errors='coerce')
             )
 
-        df_clean = df_raw.dropna(subset=[df_raw.columns[9], df_raw.columns[10], df_raw.columns[16], df_raw.columns[23]])
+        # Desconsidera qualquer jogo que tenha NaN ou -1 em qualquer coluna técnica
+        df_clean = df_raw.dropna(subset=[df_raw.columns[c] for c in cols_tecnicas]).copy()
         df_clean = df_clean[~(df_clean.iloc[:, cols_tecnicas] == -1).any(axis=1)]
 
         df_odd = df_clean[df_clean.iloc[:, 9] >= 1.60]   
@@ -319,7 +323,14 @@ def processar_vitoria(win_file, conf_file, cfg):
 
         num_cols = [c for c in merged.columns if c not in ["Country", "Short", "League", "Hour", "Status", "Home_Team", "Visitor_Team"]]
         for col in num_cols:
+            if merged[col].dtype == object:
+                merged[col] = merged[col].astype(str).str.replace('%', '', regex=False).str.replace(',', '.', regex=False)
             merged[col] = pd.to_numeric(merged[col], errors="coerce")
+
+        # REGRA DE RIGOR: Desconsidera imediatamente jogos com QUALQUER dado estatístico faltando ou igual a -1
+        merged = merged.dropna(subset=num_cols).copy()
+        mask_error = (merged[num_cols] == -1) | (merged[num_cols] == -1.0)
+        merged = merged[~mask_error.any(axis=1)].copy()
 
         df_clean = merged[(merged["Games_Home"] >= 8) & (merged["Games_Away"] >= 8)].copy()
         df_clean = filtrar_blacklist(df_clean, 'League', 'Home_Team', 'Visitor_Team', cfg)
@@ -344,29 +355,36 @@ def processar_vitoria(win_file, conf_file, cfg):
         df_clean["Prob_Home"] = 1 / (1 + np.exp(-0.035 * df_clean["Enhanced_Dominance_Score"]))
         df_clean["Prob_Away"] = 1 / (1 + np.exp(0.035 * df_clean["Enhanced_Dominance_Score"]))
 
-        # Seleciona apenas o melhor lado por jogo
+        # Remove qualquer linha restante com Probabilidade inválida
+        df_clean = df_clean.dropna(subset=["Prob_Home", "Prob_Away"]).copy()
+
         picks = []
         for _, r in df_clean.iterrows():
-            if r["Prob_Home"] >= r["Prob_Away"]:
+            prob_h = float(r["Prob_Home"])
+            prob_a = float(r["Prob_Away"])
+
+            if np.isnan(prob_h) or np.isnan(prob_a):
+                continue
+
+            if prob_h >= prob_a:
                 if r["Odds_Home"] >= 1.50:
                     r_dict = r.to_dict()
                     r_dict["Pick_Team"] = r["Home_Team"]
                     r_dict["Odds"] = r["Odds_Home"]
-                    r_dict["Prob"] = r["Prob_Home"]
+                    r_dict["Prob"] = prob_h
                     picks.append(r_dict)
             else:
                 if r["Odds_Away"] >= 1.50:
                     r_dict = r.to_dict()
                     r_dict["Pick_Team"] = r["Visitor_Team"]
                     r_dict["Odds"] = r["Odds_Away"]
-                    r_dict["Prob"] = r["Prob_Away"]
+                    r_dict["Prob"] = prob_a
                     picks.append(r_dict)
 
-        df_picks = pd.DataFrame(picks)
-
-        if df_picks.empty:
+        if not picks:
             return []
 
+        df_picks = pd.DataFrame(picks)
         all_picks = df_picks.sort_values(by="Prob", ascending=False)
         
         top_n = cfg['top_n'] if cfg['top_n'] > 0 else 10
@@ -375,7 +393,8 @@ def processar_vitoria(win_file, conf_file, cfg):
         resultados = []
         for _, r in top_picks.iterrows():
             hora_clean = str(r['Hour'])[-5:] if len(str(r['Hour'])) >= 5 else str(r['Hour'])
-            prob_pct = r['Prob'] * 100
+            prob_pct = float(r['Prob']) * 100
+            
             resultados.append({
                 'hora': hora_clean,
                 'jogo': f"{fix_str(r['Home_Team'])} vs {fix_str(r['Visitor_Team'])}",
