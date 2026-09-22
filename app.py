@@ -1,13 +1,9 @@
 import os
 import re
-import urllib.parse
 import sqlite3
 import numpy as np
 import pandas as pd
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
-from difflib import SequenceMatcher
 from datetime import datetime, date
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
@@ -460,7 +456,8 @@ if aba == "1. Análise de Arquivos":
             data_hoje = date.today().isoformat()
             sql_insert = "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, score_confianca, odd_sugerida, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendente')"
             for item in st.session_state['oportunidades_temp']:
-                c.execute(sql_insert, (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['score_confianca'], item['odd']))
+                score_str = str(item.get('score_confianca', 'N/A'))
+                c.execute(sql_insert, (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], score_str, item['odd']))
             conn.commit()
             conn.close()
             st.session_state['oportunidades_temp'] = []
@@ -484,7 +481,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
             
             with st.expander(f"📁 {estrategia} ({len(grupo)} oportunidades)", expanded=True):
                 for idx, row in grupo.iterrows():
-                    score_val = row['score_confianca'] if 'score_confianca' in row and pd.notnull(row['score_confianca']) else 'N/A'
+                    score_val = row['score_confianca'] if 'score_confianca' in row and pd.notnull(row['score_confianca']) and str(row['score_confianca']).strip() != '' else 'N/A'
                     st.markdown(f"##### ⏰ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
                     
                     col_info, col_inputs, col_botoes = st.columns([2.5, 2.5, 1.5])
@@ -539,7 +536,7 @@ elif aba == "3. Apostas em Andamento":
         for estrategia, grupo in df_andamento.groupby('script_origem'):
             with st.expander(f"📁 {estrategia} ({len(grupo)} apostas ativas)", expanded=True):
                 for idx, row in grupo.iterrows():
-                    score_val = row['score_confianca'] if 'score_confianca' in row and pd.notnull(row['score_confianca']) else 'N/A'
+                    score_val = row['score_confianca'] if 'score_confianca' in row and pd.notnull(row['score_confianca']) and str(row['score_confianca']).strip() != '' else 'N/A'
                     st.markdown(f"##### ⚽ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
                     
                     col_info, col_botoes = st.columns([3, 2])
