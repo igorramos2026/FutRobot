@@ -379,6 +379,9 @@ def processar_vitoria(win_file, conf_file, cfg):
         df_picks = pd.DataFrame(picks)
         all_picks = df_picks.sort_values(by="Prob", ascending=False)
         
+        # Remove duplicatas de partidas mantendo apenas a maior probabilidade
+        all_picks = all_picks.drop_duplicates(subset=["Home_Team", "Visitor_Team"], keep="first")
+        
         top_n = cfg['top_n'] if cfg['top_n'] > 0 else 10
         top_picks = all_picks.head(top_n).copy()
 
@@ -791,7 +794,7 @@ elif aba == "4. Dashboard Financeiro":
                         'Investimento (R\()': 'R\) {:.2f}',
                         'Lucro do Dia (R\()': 'R\) {:.2f}',
                         'ROI (%)': '{:.1f}%'
-                    }).map(colorir_lucro, subset=['Lucro do Dia (R$)', 'ROI (%)']),
+                    }).map(colorir_lucro, subset=['Lucro do Dia (R$)']),
                     use_container_width=True
                 )
 
