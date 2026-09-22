@@ -30,6 +30,7 @@ def init_db():
             liga TEXT,
             script_origem TEXT,
             recomendacao TEXT,
+            score_confianca TEXT DEFAULT 'N/A',
             odd_sugerida REAL,
             odd_comprada REAL DEFAULT 0.0,
             valor_apostado REAL DEFAULT 0.0,
@@ -43,6 +44,8 @@ def init_db():
     cols = [col[1] for col in c.fetchall()]
     if 'placar_ao_vivo' not in cols:
         c.execute("ALTER TABLE entradas ADD COLUMN placar_ao_vivo TEXT DEFAULT 'Aguardando início'")
+    if 'score_confianca' not in cols:
+        c.execute("ALTER TABLE entradas ADD COLUMN score_confianca TEXT DEFAULT 'N/A'")
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS configuracoes (
@@ -168,6 +171,7 @@ def processar_cantos(file, cfg):
                 'liga': f"{fix_str(r['Country'])} - {fix_str(r['League'])}",
                 'script': 'Cantos (Over 9.5)',
                 'recomendacao': 'Over 9.5 Cantos',
+                'score_confianca': f"Exp. Cantos: {r['Expectativa_Cruzada']:.2f}",
                 'odd': float(r['Odds_Over_95'])
             })
         return resultados
@@ -248,6 +252,7 @@ def processar_gols(file, cfg_over25, cfg_over15):
                     'liga': f"{fix_str(r.iloc[0])} - {fix_str(r.iloc[2])}",
                     'script': 'Gols (Over 2.5)',
                     'recomendacao': 'Over 2.5 Gols',
+                    'score_confianca': f"Score Elite: {r['Score_Elite']:.1f}",
                     'odd': float(r.iloc[9])
                 })
 
@@ -278,6 +283,7 @@ def processar_gols(file, cfg_over25, cfg_over15):
                     'liga': f"{fix_str(r.iloc[0])} - {fix_str(r.iloc[2])}",
                     'script': 'Gols (Over 1.5)',
                     'recomendacao': 'Over 1.5 Gols',
+                    'score_confianca': f"Score Elite: {r['Score_Elite']:.1f}",
                     'odd': float(r.iloc[9])
                 })
 
@@ -342,17 +348,30 @@ def processar_vitoria(win_file, conf_file, cfg):
         df_clean["Prob_Home"] = 1 / (1 + np.exp(-0.035 * df_clean["Enhanced_Dominance_Score"]))
         df_clean["Prob_Away"] = 1 / (1 + np.exp(0.035 * df_clean["Enhanced_Dominance_Score"]))
 
-        home_picks = df_clean[df_clean["Odds_Home"] >= 1.50].copy()
-        home_picks["Pick_Team"] = home_picks["Home_Team"]
-        home_picks["Odds"] = home_picks["Odds_Home"]
-        home_picks["Prob"] = home_picks["Prob_Home"]
+        # Seleciona apenas o melhor lado por jogo
+        picks = []
+        for _, r in df_clean.iterrows():
+            if r["Prob_Home"] >= r["Prob_Away"]:
+                if r["Odds_Home"] >= 1.50:
+                    r_dict = r.to_dict()
+                    r_dict["Pick_Team"] = r["Home_Team"]
+                    r_dict["Odds"] = r["Odds_Home"]
+                    r_dict["Prob"] = r["Prob_Home"]
+                    picks.append(r_dict)
+            else:
+                if r["Odds_Away"] >= 1.50:
+                    r_dict = r.to_dict()
+                    r_dict["Pick_Team"] = r["Visitor_Team"]
+                    r_dict["Odds"] = r["Odds_Away"]
+                    r_dict["Prob"] = r["Prob_Away"]
+                    picks.append(r_dict)
 
-        away_picks = df_clean[df_clean["Odds_Away"] >= 1.50].copy()
-        away_picks["Pick_Team"] = away_picks["Visitor_Team"]
-        away_picks["Odds"] = away_picks["Odds_Away"]
-        away_picks["Prob"] = away_picks["Prob_Away"]
+        df_picks = pd.DataFrame(picks)
 
-        all_picks = pd.concat([home_picks, away_picks]).sort_values(by="Prob", ascending=False)
+        if df_picks.empty:
+            return []
+
+        all_picks = df_picks.sort_values(by="Prob", ascending=False)
         
         top_n = cfg['top_n'] if cfg['top_n'] > 0 else 10
         top_picks = all_picks.head(top_n).copy()
@@ -360,12 +379,14 @@ def processar_vitoria(win_file, conf_file, cfg):
         resultados = []
         for _, r in top_picks.iterrows():
             hora_clean = str(r['Hour'])[-5:] if len(str(r['Hour'])) >= 5 else str(r['Hour'])
+            prob_pct = r['Prob'] * 100
             resultados.append({
                 'hora': hora_clean,
                 'jogo': f"{fix_str(r['Home_Team'])} vs {fix_str(r['Visitor_Team'])}",
                 'liga': f"{fix_str(r['Country'])} - {fix_str(r['League'])}",
                 'script': 'Vitória / Dominância',
                 'recomendacao': f"Vitória: {fix_str(r['Pick_Team'])}",
+                'score_confianca': f"Probabilidade: {prob_pct:.1f}%",
                 'odd': float(r['Odds'])
             })
         return resultados
@@ -437,9 +458,9 @@ if aba == "1. Análise de Arquivos":
             conn = sqlite3.connect("oportunidades.db")
             c = conn.cursor()
             data_hoje = date.today().isoformat()
-            sql_insert = "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, odd_sugerida, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendente')"
+            sql_insert = "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, score_confianca, odd_sugerida, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendente')"
             for item in st.session_state['oportunidades_temp']:
-                c.execute(sql_insert, (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['odd']))
+                c.execute(sql_insert, (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], item['score_confianca'], item['odd']))
             conn.commit()
             conn.close()
             st.session_state['oportunidades_temp'] = []
@@ -463,6 +484,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
             
             with st.expander(f"📁 {estrategia} ({len(grupo)} oportunidades)", expanded=True):
                 for idx, row in grupo.iterrows():
+                    score_val = row['score_confianca'] if 'score_confianca' in row and pd.notnull(row['score_confianca']) else 'N/A'
                     st.markdown(f"##### ⏰ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
                     
                     col_info, col_inputs, col_botoes = st.columns([2.5, 2.5, 1.5])
@@ -470,6 +492,7 @@ elif aba == "2. Gerenciar Entradas (Novas)":
                     with col_info:
                         st.write(f"**Liga:** {row['liga']}")
                         st.write(f"**Odd Sugerida:** {row['odd_sugerida']:.2f}")
+                        st.write(f"🔥 **Score / Confiança:** `{score_val}`")
 
                     with col_inputs:
                         key_odd = f"odd_{row['id']}"
@@ -516,6 +539,7 @@ elif aba == "3. Apostas em Andamento":
         for estrategia, grupo in df_andamento.groupby('script_origem'):
             with st.expander(f"📁 {estrategia} ({len(grupo)} apostas ativas)", expanded=True):
                 for idx, row in grupo.iterrows():
+                    score_val = row['score_confianca'] if 'score_confianca' in row and pd.notnull(row['score_confianca']) else 'N/A'
                     st.markdown(f"##### ⚽ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
                     
                     col_info, col_botoes = st.columns([3, 2])
@@ -523,6 +547,7 @@ elif aba == "3. Apostas em Andamento":
                     with col_info:
                         st.write(f"**Liga:** {row['liga']}")
                         st.write(f"**Valor Apostado:** R$ {row['valor_apostado']:.2f} | **Odd Comprada:** {row['odd_comprada']:.2f}")
+                        st.write(f"🔥 **Score / Confiança:** `{score_val}`")
 
                     with col_botoes:
                         key_green = f"green_and_{row['id']}"
@@ -860,7 +885,11 @@ elif aba == "4. Dashboard Financeiro":
                     st.rerun()
 
             st.subheader("📋 Histórico Detalhado do Período Selecionado")
-            df_historico_view = df_filtrado[['id', 'data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']].copy()
+            
+            cols_exibir = ['id', 'data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'score_confianca', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']
+            cols_existentes = [c for c in cols_exibir if c in df_filtrado.columns]
+            df_historico_view = df_filtrado[cols_existentes].copy()
+            
             st.dataframe(
                 df_historico_view.style.format({
                     'odd_comprada': '{:.2f}',
