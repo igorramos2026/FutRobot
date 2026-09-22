@@ -3,6 +3,7 @@ import re
 import sqlite3
 import numpy as np
 import pandas as pd
+from scipy.stats import poisson
 import streamlit as st
 from datetime import datetime, date
 
@@ -142,7 +143,6 @@ def processar_cantos(file, cfg):
                 df[col] = df[col].astype(str).str.replace('%', '', regex=False).str.replace(',', '.', regex=False)
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # Filtra jogos com erro (-1) nas estatísticas de cantos e amostra
         cols_checar = ['Corners_Pro_Home', 'Corners_Pro_Away', 'Corners_Con_Home', 'Corners_Con_Away', 'Sample_Home', 'Sample_Away']
         df = df[~(df[cols_checar] == -1).any(axis=1)].copy()
 
@@ -200,7 +200,6 @@ def processar_gols(file, cfg_over25, cfg_over15):
                 .apply(pd.to_numeric, errors='coerce')
             )
 
-        # Remove linhas com erro -1 nas estatísticas
         df_clean = df_raw[~(df_raw.iloc[:, cols_tecnicas] == -1).any(axis=1)].copy()
 
         df_odd = df_clean[df_clean.iloc[:, 9] >= 1.60]   
@@ -289,7 +288,7 @@ def processar_gols(file, cfg_over25, cfg_over15):
         st.error(f"Erro ao processar arquivo de Gols: {e}")
         return []
 
-# --- LÓGICA DO SCRIPT 3: VITÓRIA ---
+# --- LÓGICA DO SCRIPT 3: VITÓRIA (POISSON HÍBRIDO 1X2) ---
 def processar_vitoria(win_file, conf_file, cfg):
     try:
         df_win = pd.read_csv(win_file, sep=";", encoding='latin-1')
@@ -324,7 +323,6 @@ def processar_vitoria(win_file, conf_file, cfg):
                 merged[col] = merged[col].astype(str).str.replace('%', '', regex=False).str.replace(',', '.', regex=False)
             merged[col] = pd.to_numeric(merged[col], errors="coerce")
 
-        # Filtra jogos marcados com erro (-1) nas estatísticas de jogos
         cols_vit_checar = ["Efficiency_Home", "Efficiency_Away", "Games_Home", "Games_Away", "Goals_Scored_Home", "Goals_Scored_Away"]
         merged = merged[~(merged[cols_vit_checar] == -1).any(axis=1)].copy()
         merged[num_cols] = merged[num_cols].fillna(0.0)
@@ -332,54 +330,110 @@ def processar_vitoria(win_file, conf_file, cfg):
         df_clean = merged[(merged["Games_Home"] >= 8) & (merged["Games_Away"] >= 8)].copy()
         df_clean = filtrar_blacklist(df_clean, 'League', 'Home_Team', 'Visitor_Team', cfg)
 
+        # 1. CÁLCULO DA DOMINÂNCIA E AJUSTE DE xG
         df_clean["Diff_Efficiency"] = df_clean["Efficiency_Home"] - df_clean["Efficiency_Away"]
-        df_clean["Diff_WinPct"] = df_clean["Win_Pct_Home"] - df_clean["Win_Pct_Away"]
         df_clean["Net_Goal_Dominance"] = (df_clean["Goals_Scored_Home"] - df_clean["Goals_Conceded_Home"]) - (df_clean["Goals_Scored_Away"] - df_clean["Goals_Conceded_Away"])
         df_clean["Net_Shots_OnTarget"] = (df_clean["ShotsOnTarget_Scored_Home"] - df_clean["ShotsOnTarget_Conceded_Home"]) - (df_clean["ShotsOnTarget_Scored_Away"] - df_clean["ShotsOnTarget_Conceded_Away"])
         df_clean["Diff_Pressure"] = df_clean["Pressure_Home"] - df_clean["Pressure_Away"]
-        df_clean["Diff_Attacks"] = df_clean["Attacks_Min_Home"] - df_clean["Attacks_Min_Away"]
-        df_clean["Diff_Possession"] = df_clean["Possession_Home"] - df_clean["Possession_Away"]
-        df_clean["Net_Total_Shots"] = (df_clean["Shots_Scored_Home"] - df_clean["Shots_Conceded_Home"]) - (df_clean["Shots_Scored_Away"] - df_clean["Shots_Conceded_Away"])
-        df_clean["Diff_H2H"] = df_clean["H2H_Win_Pct_Home"] - df_clean["H2H_Win_Pct_Away"]
 
-        df_clean["Enhanced_Dominance_Score"] = (
-            0.20 * df_clean["Diff_Efficiency"] + 0.10 * df_clean["Diff_WinPct"] +
-            0.20 * (df_clean["Net_Goal_Dominance"] * 20) + 0.15 * (df_clean["Net_Shots_OnTarget"] * 10) +
-            0.10 * df_clean["Diff_Pressure"] + 0.05 * (df_clean["Diff_Attacks"] * 50) +
-            0.05 * df_clean["Diff_Possession"] + 0.05 * (df_clean["Net_Total_Shots"] * 5) + 0.10 * df_clean["Diff_H2H"]
-        )
+        # Base de Gols Esperados (xG) ajustados por Dominância
+        avg_goals_home = np.maximum(df_clean["Goals_Scored_Home"], 0.5)
+        avg_goals_away = np.maximum(df_clean["Goals_Scored_Away"], 0.5)
 
-        df_clean["Prob_Home"] = 1 / (1 + np.exp(-0.035 * df_clean["Enhanced_Dominance_Score"]))
-        df_clean["Prob_Away"] = 1 / (1 + np.exp(0.035 * df_clean["Enhanced_Dominance_Score"]))
+        mod_home = 1.0 + (df_clean["Diff_Efficiency"] * 0.005) + (df_clean["Diff_Pressure"] * 0.002)
+        mod_away = 1.0 - (df_clean["Diff_Efficiency"] * 0.005) - (df_clean["Diff_Pressure"] * 0.002)
 
-        # SELEÇÃO ÚNICA POR JOGO: Escolhe apenas o time com maior probabilidade
+        df_clean["xG_Home"] = np.clip(avg_goals_home * mod_home, 0.2, 4.5)
+        df_clean["xG_Away"] = np.clip(avg_goals_away * mod_away, 0.2, 4.5)
+
+        # 2. MODELO POISSON DE 3 VIAS (1X2)
         picks = []
-        for _, r in df_clean.iterrows():
-            prob_h = float(r["Prob_Home"])
-            prob_a = float(r["Prob_Away"])
+        max_goals = 8
 
-            if prob_h >= prob_a:
-                if r["Odds_Home"] >= 1.50:
-                    r_dict = r.to_dict()
-                    r_dict["Pick_Team"] = r["Home_Team"]
-                    r_dict["Odds"] = r["Odds_Home"]
-                    r_dict["Prob"] = prob_h
-                    picks.append(r_dict)
-            else:
-                if r["Odds_Away"] >= 1.50:
-                    r_dict = r.to_dict()
-                    r_dict["Pick_Team"] = r["Visitor_Team"]
-                    r_dict["Odds"] = r["Odds_Away"]
-                    r_dict["Prob"] = prob_a
-                    picks.append(r_dict)
+        for _, r in df_clean.iterrows():
+            lambda_h = r["xG_Home"]
+            lambda_a = r["xG_Away"]
+
+            # Matriz de placares prováveis
+            prob_matrix = np.outer(
+                poisson.pmf(np.arange(max_goals), lambda_h),
+                poisson.pmf(np.arange(max_goals), lambda_a)
+            )
+
+            p_home = float(np.sum(np.tril(prob_matrix, -1)))
+            p_draw = float(np.sum(np.diag(prob_matrix)))
+            p_away = float(np.sum(np.triu(prob_matrix, 1)))
+
+            # Normaliza somatório para 100%
+            total_p = p_home + p_draw + p_away
+            p_home /= total_p
+            p_draw /= total_p
+            p_away /= total_p
+
+            # 3. APLICAÇÃO REGRAS DE INDICAÇÃO E REGRA DE ODD >= 1.50
+            # TIME DA CASA
+            if p_home >= 0.55 and p_draw < 0.25 and r["Odds_Home"] >= 1.50:
+                picks.append({
+                    'Hour': r['Hour'],
+                    'Home_Team': r['Home_Team'],
+                    'Visitor_Team': r['Visitor_Team'],
+                    'Country': r['Country'],
+                    'League': r['League'],
+                    'Pick_Team': r['Home_Team'],
+                    'Recomendacao': f"Back Vitória: {fix_str(r['Home_Team'])}",
+                    'Score': f"Vitória: {p_home*100:.1f}% | Empate: {p_draw*100:.1f}%",
+                    'Odds': float(r['Odds_Home']),
+                    'Prob_Sort': p_home
+                })
+            elif 0.45 <= p_home <= 0.55 and p_draw > 0.25 and r["Odds_Home"] >= 1.50:
+                picks.append({
+                    'Hour': r['Hour'],
+                    'Home_Team': r['Home_Team'],
+                    'Visitor_Team': r['Visitor_Team'],
+                    'Country': r['Country'],
+                    'League': r['League'],
+                    'Pick_Team': r['Home_Team'],
+                    'Recomendacao': f"Empate Anula (DNB / AH 0.0): {fix_str(r['Home_Team'])}",
+                    'Score': f"Vitória: {p_home*100:.1f}% | Empate: {p_draw*100:.1f}%",
+                    'Odds': float(r['Odds_Home']),
+                    'Prob_Sort': p_home
+                })
+
+            # TIME VISITANTE
+            if p_away >= 0.55 and p_draw < 0.25 and r["Odds_Away"] >= 1.50:
+                picks.append({
+                    'Hour': r['Hour'],
+                    'Home_Team': r['Home_Team'],
+                    'Visitor_Team': r['Visitor_Team'],
+                    'Country': r['Country'],
+                    'League': r['League'],
+                    'Pick_Team': r['Visitor_Team'],
+                    'Recomendacao': f"Back Vitória: {fix_str(r['Visitor_Team'])}",
+                    'Score': f"Vitória: {p_away*100:.1f}% | Empate: {p_draw*100:.1f}%",
+                    'Odds': float(r['Odds_Away']),
+                    'Prob_Sort': p_away
+                })
+            elif 0.45 <= p_away <= 0.55 and p_draw > 0.25 and r["Odds_Away"] >= 1.50:
+                picks.append({
+                    'Hour': r['Hour'],
+                    'Home_Team': r['Home_Team'],
+                    'Visitor_Team': r['Visitor_Team'],
+                    'Country': r['Country'],
+                    'League': r['League'],
+                    'Pick_Team': r['Visitor_Team'],
+                    'Recomendacao': f"Empate Anula (DNB / AH 0.0): {fix_str(r['Visitor_Team'])}",
+                    'Score': f"Vitória: {p_away*100:.1f}% | Empate: {p_draw*100:.1f}%",
+                    'Odds': float(r['Odds_Away']),
+                    'Prob_Sort': p_away
+                })
 
         if not picks:
             return []
 
         df_picks = pd.DataFrame(picks)
-        all_picks = df_picks.sort_values(by="Prob", ascending=False)
+        all_picks = df_picks.sort_values(by="Prob_Sort", ascending=False)
         
-        # Remove duplicatas de partidas mantendo apenas a maior probabilidade
+        # Elimina jogos duplicados no mesmo confronto
         all_picks = all_picks.drop_duplicates(subset=["Home_Team", "Visitor_Team"], keep="first")
         
         top_n = cfg['top_n'] if cfg['top_n'] > 0 else 10
@@ -388,15 +442,13 @@ def processar_vitoria(win_file, conf_file, cfg):
         resultados = []
         for _, r in top_picks.iterrows():
             hora_clean = str(r['Hour'])[-5:] if len(str(r['Hour'])) >= 5 else str(r['Hour'])
-            prob_pct = float(r['Prob']) * 100
-            
             resultados.append({
                 'hora': hora_clean,
                 'jogo': f"{fix_str(r['Home_Team'])} vs {fix_str(r['Visitor_Team'])}",
                 'liga': f"{fix_str(r['Country'])} - {fix_str(r['League'])}",
                 'script': 'Vitória / Dominância',
-                'recomendacao': f"Vitória: {fix_str(r['Pick_Team'])}",
-                'score_confianca': f"Probabilidade: {prob_pct:.1f}%",
+                'recomendacao': r['Recomendacao'],
+                'score_confianca': r['Score'],
                 'odd': float(r['Odds'])
             })
         return resultados
@@ -656,7 +708,6 @@ elif aba == "4. Dashboard Financeiro":
             lucro_total = df_filtrado['lucro_prejuizo'].sum()
             roi = (lucro_total / total_investido * 100) if total_investido > 0 else 0
 
-            # Cálculo do Max Drawdown
             df_dd_calc = df_filtrado.sort_values('data_registro').copy()
             df_dd_calc['Lucro_Acum'] = df_dd_calc['lucro_prejuizo'].cumsum()
             df_dd_calc['Pico'] = df_dd_calc['Lucro_Acum'].cummax()
