@@ -136,24 +136,22 @@ def processar_cantos(file, cfg):
     try:
         df = pd.read_csv(file, sep=';', names=CORRECT_COL_NAMES, skiprows=1, encoding='latin-1')
         
-        # Desconsidera imediatamente qualquer jogo com erro (-1) ou dado faltando
         numeric_cols = CORRECT_COL_NAMES[9:]
         for col in numeric_cols:
             if df[col].dtype == object:
                 df[col] = df[col].astype(str).str.replace('%', '', regex=False).str.replace(',', '.', regex=False)
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # Elimina dados faltantes ou códigos de erro (-1)
-        df = df.dropna(subset=numeric_cols).copy()
-        mask_error = (df[numeric_cols] == -1) | (df[numeric_cols] == -1.0)
-        df = df[~mask_error.any(axis=1)].copy()
-
+        # Desconsidera jogos que não possuem dados de médias de cantos/amostra
+        cols_essenciais = ['Corners_Pro_Home', 'Corners_Pro_Away', 'Corners_Con_Home', 'Corners_Con_Away', 'Sample_Home', 'Sample_Away', 'Odds_Over_95']
+        df = df.dropna(subset=cols_essenciais).copy()
+        
         df = filtrar_blacklist(df, 'League', 'Home', 'Away', cfg)
 
         df['xCorners_Home'] = (df['Corners_Pro_Home'] * 0.60) + (df['Corners_Con_Away'] * 0.40)
         df['xCorners_Away'] = (df['Corners_Pro_Away'] * 0.40) + (df['Corners_Con_Home'] * 0.60)
         df['Expectativa_Cruzada'] = (df['xCorners_Home'] + df['xCorners_Away']).round(2)
-        df['APPM_Total'] = (df['APPM_Home'] + df['APPM_Away']).round(2)
+        df['APPM_Total'] = (df['APPM_Home'].fillna(0) + df['APPM_Away'].fillna(0)).round(2)
 
         df_base = df[(df['Sample_Home'] >= 10) & (df['Sample_Away'] >= 10) & (df['Odds_Over_95'] > 1.0)].copy()
         df_main = df_base[(df_base['Expectativa_Cruzada'] >= 11.50) & (df_base['APPM_Total'] >= 1.00)].sort_values(by='Expectativa_Cruzada', ascending=False).copy()
@@ -202,8 +200,8 @@ def processar_gols(file, cfg_over25, cfg_over15):
                 .apply(pd.to_numeric, errors='coerce')
             )
 
-        # Desconsidera qualquer jogo que tenha NaN ou -1 em qualquer coluna técnica
-        df_clean = df_raw.dropna(subset=[df_raw.columns[c] for c in cols_tecnicas]).copy()
+        # Exige integridade nas colunas de gols e odds
+        df_clean = df_raw.dropna(subset=[df_raw.columns[9], df_raw.columns[10], df_raw.columns[16], df_raw.columns[23]]).copy()
         df_clean = df_clean[~(df_clean.iloc[:, cols_tecnicas] == -1).any(axis=1)]
 
         df_odd = df_clean[df_clean.iloc[:, 9] >= 1.60]   
@@ -220,7 +218,7 @@ def processar_gols(file, cfg_over25, cfg_over15):
         df_s5['Pressao_LadoA'] = df_s5.iloc[:, 29] + df_s5.iloc[:, 32]
         df_s5['Pressao_LadoB'] = df_s5.iloc[:, 30] + df_s5.iloc[:, 31]
         df_s5['Total_Chutes_Proj'] = df_s5['Pressao_LadoA'] + df_s5['Pressao_LadoB']
-        df_s5['Chutes_Por_Gol'] = df_s5['Total_Chutes_Proj'] / df_s5['Vol_FT']
+        df_s5['Chutes_Por_Gol'] = df_s5['Total_Chutes_Proj'] / df_s5['Vol_FT'].replace(0, np.nan)
         df_s5['Barreira_Under'] = df_s5.iloc[:, 24]
 
         col_liga, col_casa, col_fora = df_s5.columns[2], df_s5.columns[5], df_s5.columns[8]
@@ -327,10 +325,14 @@ def processar_vitoria(win_file, conf_file, cfg):
                 merged[col] = merged[col].astype(str).str.replace('%', '', regex=False).str.replace(',', '.', regex=False)
             merged[col] = pd.to_numeric(merged[col], errors="coerce")
 
-        # REGRA DE RIGOR: Desconsidera imediatamente jogos com QUALQUER dado estatístico faltando ou igual a -1
-        merged = merged.dropna(subset=num_cols).copy()
-        mask_error = (merged[num_cols] == -1) | (merged[num_cols] == -1.0)
-        merged = merged[~mask_error.any(axis=1)].copy()
+        # COLUNAS MANDATÓRIAS: Exige dados nas colunas principais para não descartar a tabela por causa de H2H ausente
+        cols_obrigatorias = [
+            "Odds_Home", "Odds_Away", "Efficiency_Home", "Efficiency_Away",
+            "Games_Home", "Games_Away", "Pressure_Home", "Pressure_Away",
+            "Goals_Scored_Home", "Goals_Scored_Away", "Goals_Conceded_Home", "Goals_Conceded_Away"
+        ]
+        merged = merged.dropna(subset=cols_obrigatorias).copy()
+        merged[num_cols] = merged[num_cols].fillna(0.0)
 
         df_clean = merged[(merged["Games_Home"] >= 8) & (merged["Games_Away"] >= 8)].copy()
         df_clean = filtrar_blacklist(df_clean, 'League', 'Home_Team', 'Visitor_Team', cfg)
@@ -355,7 +357,7 @@ def processar_vitoria(win_file, conf_file, cfg):
         df_clean["Prob_Home"] = 1 / (1 + np.exp(-0.035 * df_clean["Enhanced_Dominance_Score"]))
         df_clean["Prob_Away"] = 1 / (1 + np.exp(0.035 * df_clean["Enhanced_Dominance_Score"]))
 
-        # Remove qualquer linha restante com Probabilidade inválida
+        # Garante a filtragem sem dar erro
         df_clean = df_clean.dropna(subset=["Prob_Home", "Prob_Away"]).copy()
 
         picks = []
