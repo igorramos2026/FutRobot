@@ -193,7 +193,6 @@ def processar_gols(file, cfg_over25, cfg_over15):
             df_raw = pd.read_csv(file, sep=';', encoding='latin-1')
 
         if df_raw.empty or len(df_raw.columns) < 10:
-            st.warning("⚠️ O arquivo de Gols enviado está vazio ou num formato incompatível.")
             return []
 
         df_raw.columns = [str(c).strip() for c in df_raw.columns]
@@ -208,21 +207,14 @@ def processar_gols(file, cfg_over25, cfg_over15):
             )
 
         df_clean = df_raw[~(df_raw.iloc[:, cols_tecnicas] == -1).any(axis=1)].copy()
-
         df_odd = df_clean[df_clean.iloc[:, 9] >= 1.60]   
         df_s5 = df_odd[(df_odd.iloc[:, 16] >= 8) & (df_odd.iloc[:, 17] >= 8)].copy()
 
         df_s5['SideA_FT'] = df_s5.iloc[:, 10] + df_s5.iloc[:, 13]
         df_s5['SideB_FT'] = df_s5.iloc[:, 11] + df_s5.iloc[:, 12]
         df_s5['Vol_FT'] = df_s5['SideA_FT'] + df_s5['SideB_FT']
-
-        df_s5['SideA_HT'] = df_s5.iloc[:, 25] + df_s5.iloc[:, 28]
-        df_s5['SideB_HT'] = df_s5.iloc[:, 26] + df_s5.iloc[:, 27]
-        df_s5['Vol_HT'] = df_s5['SideA_HT'] + df_s5['SideB_HT']
-
-        df_s5['Pressao_LadoA'] = df_s5.iloc[:, 29] + df_s5.iloc[:, 32]
-        df_s5['Pressao_LadoB'] = df_s5.iloc[:, 30] + df_s5.iloc[:, 31]
-        df_s5['Total_Chutes_Proj'] = df_s5['Pressao_LadoA'] + df_s5['Pressao_LadoB']
+        df_s5['Vol_HT'] = (df_s5.iloc[:, 25] + df_s5.iloc[:, 28]) + (df_s5.iloc[:, 26] + df_s5.iloc[:, 27])
+        df_s5['Total_Chutes_Proj'] = (df_s5.iloc[:, 29] + df_s5.iloc[:, 32]) + (df_s5.iloc[:, 30] + df_s5.iloc[:, 31])
         df_s5['Chutes_Por_Gol'] = df_s5['Total_Chutes_Proj'] / df_s5['Vol_FT'].replace(0, np.nan)
         df_s5['Barreira_Under'] = df_s5.iloc[:, 24]
 
@@ -240,17 +232,13 @@ def processar_gols(file, cfg_over25, cfg_over15):
             s_hist = df_ht_25.iloc[:, 23]
             df_ht_25['Score_Elite'] = (s_ft * 0.25) + (s_press * 0.30) + (s_freq * 0.25) + (s_hist * 0.20)
             
-            df_score_25 = df_ht_25[df_ht_25['Score_Elite'] >= 60.0].sort_values(by='Score_Elite', ascending=False).copy()
+            df_score_25 = df_ht_25[df_ht_25['Score_Elite'] >= 60.0].sort_values(by='Score_Elite', ascending=False)
             mask_over25 = (df_score_25['Vol_FT'] >= 5.0) & (df_score_25['SideA_FT'] >= 2.5) & (df_score_25['SideB_FT'] >= 2.5) & (df_score_25['Barreira_Under'] < 42.0)
-            
-            df_res_25 = df_score_25[mask_over25].copy()
-            if cfg_over25['top_n'] > 0:
-                df_res_25 = df_res_25.head(cfg_over25['top_n'])
+            df_res_25 = df_score_25[mask_over25].head(cfg_over25['top_n']) if cfg_over25['top_n'] > 0 else df_score_25[mask_over25]
 
             for _, r in df_res_25.iterrows():
-                hora_clean = str(r.iloc[3])[-5:]
                 resultados.append({
-                    'hora': hora_clean,
+                    'hora': str(r.iloc[3])[-5:],
                     'jogo': f"{fix_str(r.iloc[5])} vs {fix_str(r.iloc[8])}",
                     'liga': f"{fix_str(r.iloc[0])} - {fix_str(r.iloc[2])}",
                     'script': 'Gols (Over 2.5)',
@@ -270,18 +258,14 @@ def processar_gols(file, cfg_over25, cfg_over15):
             s_hist = df_ht_15.iloc[:, 23]
             df_ht_15['Score_Elite'] = (s_ft * 0.25) + (s_press * 0.30) + (s_freq * 0.25) + (s_hist * 0.20)
             
-            df_score_15 = df_ht_15[df_ht_15['Score_Elite'] >= 60.0].sort_values(by='Score_Elite', ascending=False).copy()
+            df_score_15 = df_ht_15[df_ht_15['Score_Elite'] >= 60.0].sort_values(by='Score_Elite', ascending=False)
             mask_over25_check = (df_score_15['Vol_FT'] >= 5.0) & (df_score_15['SideA_FT'] >= 2.5) & (df_score_15['SideB_FT'] >= 2.5) & (df_score_15['Barreira_Under'] < 42.0)
             mask_over15 = (df_score_15['Vol_FT'] >= 5.0) & (df_score_15['Barreira_Under'] <= 50.0) & (~mask_over25_check)
 
-            df_res_15 = df_score_15[mask_over15].copy()
-            if cfg_over15['top_n'] > 0:
-                df_res_15 = df_res_15.head(cfg_over15['top_n'])
-
+            df_res_15 = df_score_15[mask_over15].head(cfg_over15['top_n']) if cfg_over15['top_n'] > 0 else df_score_15[mask_over15]
             for _, r in df_res_15.iterrows():
-                hora_clean = str(r.iloc[3])[-5:]
                 resultados.append({
-                    'hora': hora_clean,
+                    'hora': str(r.iloc[3])[-5:],
                     'jogo': f"{fix_str(r.iloc[5])} vs {fix_str(r.iloc[8])}",
                     'liga': f"{fix_str(r.iloc[0])} - {fix_str(r.iloc[2])}",
                     'script': 'Gols (Over 1.5)',
@@ -292,7 +276,6 @@ def processar_gols(file, cfg_over25, cfg_over15):
 
         return resultados
     except Exception as e:
-        st.error(f"Erro ao processar arquivo de Gols: {e}")
         return []
 
 # --- SCRIPT 3 (NOVO): NOVO ROBÔ VITÓRIA (POISSON HÍBRIDO) ---
@@ -314,114 +297,47 @@ def processar_vitoria_novo(df_clean, cfg):
         max_goals = 8
 
         for _, r in df_clean.iterrows():
-            lambda_h = r["xG_Home"]
-            lambda_a = r["xG_Away"]
-
+            lambda_h, lambda_a = r["xG_Home"], r["xG_Away"]
             p_home, p_draw, p_away = 0.0, 0.0, 0.0
 
             for h in range(max_goals):
                 p_h = calcular_poisson(h, lambda_h)
                 for a in range(max_goals):
                     p_a = calcular_poisson(a, lambda_a)
-                    prob_placar = p_h * p_a
-
-                    if h > a:
-                        p_home += prob_placar
-                    elif h == a:
-                        p_draw += prob_placar
-                    else:
-                        p_away += prob_placar
+                    prob = p_h * p_a
+                    if h > a: p_home += prob
+                    elif h == a: p_draw += prob
+                    else: p_away += prob
 
             total_p = p_home + p_draw + p_away
             if total_p > 0:
-                p_home /= total_p
-                p_draw /= total_p
-                p_away /= total_p
+                p_home, p_draw, p_away = p_home/total_p, p_draw/total_p, p_away/total_p
 
             if p_home >= 0.55 and p_draw < 0.25 and r["Odds_Home"] >= 1.50:
-                picks.append({
-                    'Hour': r['Hour'],
-                    'Home_Team': r['Home_Team'],
-                    'Visitor_Team': r['Visitor_Team'],
-                    'Country': r['Country'],
-                    'League': r['League'],
-                    'Recomendacao': f"Back Vitória: {fix_str(r['Home_Team'])}",
-                    'Score': f"Vitória: {p_home*100:.1f}% | Empate: {p_draw*100:.1f}%",
-                    'Odds': float(r['Odds_Home']),
-                    'Prob_Sort': p_home
-                })
+                picks.append({'Hour': r['Hour'], 'Home_Team': r['Home_Team'], 'Visitor_Team': r['Visitor_Team'], 'Country': r['Country'], 'League': r['League'], 'Recomendacao': f"Back Vitória: {fix_str(r['Home_Team'])}", 'Score': f"Vitória: {p_home*100:.1f}%", 'Odds': float(r['Odds_Home']), 'Prob_Sort': p_home})
             elif 0.45 <= p_home <= 0.55 and p_draw > 0.25 and r["Odds_Home"] >= 1.50:
-                picks.append({
-                    'Hour': r['Hour'],
-                    'Home_Team': r['Home_Team'],
-                    'Visitor_Team': r['Visitor_Team'],
-                    'Country': r['Country'],
-                    'League': r['League'],
-                    'Recomendacao': f"Empate Anula (DNB): {fix_str(r['Home_Team'])}",
-                    'Score': f"Vitória: {p_home*100:.1f}% | Empate: {p_draw*100:.1f}%",
-                    'Odds': float(r['Odds_Home']),
-                    'Prob_Sort': p_home
-                })
+                picks.append({'Hour': r['Hour'], 'Home_Team': r['Home_Team'], 'Visitor_Team': r['Visitor_Team'], 'Country': r['Country'], 'League': r['League'], 'Recomendacao': f"DNB: {fix_str(r['Home_Team'])}", 'Score': f"Vitória: {p_home*100:.1f}%", 'Odds': float(r['Odds_Home']), 'Prob_Sort': p_home})
 
             if p_away >= 0.55 and p_draw < 0.25 and r["Odds_Away"] >= 1.50:
-                picks.append({
-                    'Hour': r['Hour'],
-                    'Home_Team': r['Home_Team'],
-                    'Visitor_Team': r['Visitor_Team'],
-                    'Country': r['Country'],
-                    'League': r['League'],
-                    'Recomendacao': f"Back Vitória: {fix_str(r['Visitor_Team'])}",
-                    'Score': f"Vitória: {p_away*100:.1f}% | Empate: {p_draw*100:.1f}%",
-                    'Odds': float(r['Odds_Away']),
-                    'Prob_Sort': p_away
-                })
+                picks.append({'Hour': r['Hour'], 'Home_Team': r['Home_Team'], 'Visitor_Team': r['Visitor_Team'], 'Country': r['Country'], 'League': r['League'], 'Recomendacao': f"Back Vitória: {fix_str(r['Visitor_Team'])}", 'Score': f"Vitória: {p_away*100:.1f}%", 'Odds': float(r['Odds_Away']), 'Prob_Sort': p_away})
             elif 0.45 <= p_away <= 0.55 and p_draw > 0.25 and r["Odds_Away"] >= 1.50:
-                picks.append({
-                    'Hour': r['Hour'],
-                    'Home_Team': r['Home_Team'],
-                    'Visitor_Team': r['Visitor_Team'],
-                    'Country': r['Country'],
-                    'League': r['League'],
-                    'Recomendacao': f"Empate Anula (DNB): {fix_str(r['Visitor_Team'])}",
-                    'Score': f"Vitória: {p_away*100:.1f}% | Empate: {p_draw*100:.1f}%",
-                    'Odds': float(r['Odds_Away']),
-                    'Prob_Sort': p_away
-                })
+                picks.append({'Hour': r['Hour'], 'Home_Team': r['Home_Team'], 'Visitor_Team': r['Visitor_Team'], 'Country': r['Country'], 'League': r['League'], 'Recomendacao': f"DNB: {fix_str(r['Visitor_Team'])}", 'Score': f"Vitória: {p_away*100:.1f}%", 'Odds': float(r['Odds_Away']), 'Prob_Sort': p_away})
 
-        if not picks:
-            return []
+        if not picks: return []
+        df_picks = pd.DataFrame(picks).sort_values(by="Prob_Sort", ascending=False).drop_duplicates(subset=["Home_Team", "Visitor_Team"])
+        top_picks = df_picks.head(cfg['top_n']) if cfg['top_n'] > 0 else df_picks
 
-        df_picks = pd.DataFrame(picks)
-        all_picks = df_picks.sort_values(by="Prob_Sort", ascending=False)
-        all_picks = all_picks.drop_duplicates(subset=["Home_Team", "Visitor_Team"], keep="first")
-        
-        top_n = cfg['top_n'] if cfg['top_n'] > 0 else 10
-        top_picks = all_picks.head(top_n).copy()
-
-        resultados = []
+        res = []
         for _, r in top_picks.iterrows():
-            hora_clean = str(r['Hour'])[-5:] if len(str(r['Hour'])) >= 5 else str(r['Hour'])
-            resultados.append({
-                'hora': hora_clean,
-                'jogo': f"{fix_str(r['Home_Team'])} vs {fix_str(r['Visitor_Team'])}",
-                'liga': f"{fix_str(r['Country'])} - {fix_str(r['League'])}",
-                'script': 'Vitória / Dominância (Novo)',
-                'recomendacao': r['Recomendacao'],
-                'score_confianca': r['Score'],
-                'odd': float(r['Odds'])
-            })
-        return resultados
-    except Exception as e:
-        st.error(f"Erro ao processar Novo Robô de Vitória: {e}")
+            res.append({'hora': str(r['Hour'])[-5:], 'jogo': f"{fix_str(r['Home_Team'])} vs {fix_str(r['Visitor_Team'])}", 'liga': f"{fix_str(r['Country'])} - {fix_str(r['League'])}", 'script': 'Vitória / Dominância (Novo)', 'recomendacao': r['Recomendacao'], 'score_confianca': r['Score'], 'odd': float(r['Odds'])})
+        return res
+    except:
         return []
 
-# --- SCRIPT 3 (ANTIGO): ANÁLISE ORIGINAL IDÊNTICA AO CÓDIGO ANTERIOR ---
+# --- SCRIPT 3 (ANTIGO): ANÁLISE ORIGINAL ---
 def processar_vitoria_antigo(df_clean, cfg):
     try:
-        # Algoritmo Antigo Original:
-        # Diferença de Eficiência + Diferença de Pressão + % Vitória
         df_old = df_clean.copy()
-        
         df_old["Diff_Efficiency"] = df_old["Efficiency_Home"] - df_old["Efficiency_Away"]
         df_old["Diff_Pressure"] = df_old["Pressure_Home"] - df_old["Pressure_Away"]
         df_old["Score_Dominance_Home"] = (df_old["Diff_Efficiency"] * 0.6) + (df_old["Diff_Pressure"] * 0.4) + (df_old["Win_Pct_Home"] * 0.2)
@@ -429,58 +345,20 @@ def processar_vitoria_antigo(df_clean, cfg):
 
         picks = []
         for _, r in df_old.iterrows():
-            # Filtro original mandante
             if r["Score_Dominance_Home"] >= 25.0 and r["H2H_Win_Pct_Home"] >= 40.0 and r["Odds_Home"] >= 1.50:
-                picks.append({
-                    'Hour': r['Hour'],
-                    'Home_Team': r['Home_Team'],
-                    'Visitor_Team': r['Visitor_Team'],
-                    'Country': r['Country'],
-                    'League': r['League'],
-                    'Recomendacao': f"Back Vitória: {fix_str(r['Home_Team'])}",
-                    'Score': f"Dominância: {r['Score_Dominance_Home']:.1f}",
-                    'Odds': float(r['Odds_Home']),
-                    'Score_Sort': r['Score_Dominance_Home']
-                })
-            # Filtro original visitante
+                picks.append({'Hour': r['Hour'], 'Home_Team': r['Home_Team'], 'Visitor_Team': r['Visitor_Team'], 'Country': r['Country'], 'League': r['League'], 'Recomendacao': f"Back Vitória: {fix_str(r['Home_Team'])}", 'Score': f"Dom.: {r['Score_Dominance_Home']:.1f}", 'Odds': float(r['Odds_Home']), 'Score_Sort': r['Score_Dominance_Home']})
             elif r["Score_Dominance_Away"] >= 25.0 and r["H2H_Win_Pct_Away"] >= 40.0 and r["Odds_Away"] >= 1.50:
-                picks.append({
-                    'Hour': r['Hour'],
-                    'Home_Team': r['Home_Team'],
-                    'Visitor_Team': r['Visitor_Team'],
-                    'Country': r['Country'],
-                    'League': r['League'],
-                    'Recomendacao': f"Back Vitória: {fix_str(r['Visitor_Team'])}",
-                    'Score': f"Dominância: {r['Score_Dominance_Away']:.1f}",
-                    'Odds': float(r['Odds_Away']),
-                    'Score_Sort': r['Score_Dominance_Away']
-                })
+                picks.append({'Hour': r['Hour'], 'Home_Team': r['Home_Team'], 'Visitor_Team': r['Visitor_Team'], 'Country': r['Country'], 'League': r['League'], 'Recomendacao': f"Back Vitória: {fix_str(r['Visitor_Team'])}", 'Score': f"Dom.: {r['Score_Dominance_Away']:.1f}", 'Odds': float(r['Odds_Away']), 'Score_Sort': r['Score_Dominance_Away']})
 
-        if not picks:
-            return []
+        if not picks: return []
+        df_picks = pd.DataFrame(picks).sort_values(by="Score_Sort", ascending=False).drop_duplicates(subset=["Home_Team", "Visitor_Team"])
+        top_picks = df_picks.head(cfg['top_n']) if cfg['top_n'] > 0 else df_picks
 
-        df_picks = pd.DataFrame(picks)
-        all_picks = df_picks.sort_values(by="Score_Sort", ascending=False)
-        all_picks = all_picks.drop_duplicates(subset=["Home_Team", "Visitor_Team"], keep="first")
-        
-        top_n = cfg['top_n'] if cfg['top_n'] > 0 else 10
-        top_picks = all_picks.head(top_n).copy()
-
-        resultados = []
+        res = []
         for _, r in top_picks.iterrows():
-            hora_clean = str(r['Hour'])[-5:] if len(str(r['Hour'])) >= 5 else str(r['Hour'])
-            resultados.append({
-                'hora': hora_clean,
-                'jogo': f"{fix_str(r['Home_Team'])} vs {fix_str(r['Visitor_Team'])}",
-                'liga': f"{fix_str(r['Country'])} - {fix_str(r['League'])}",
-                'script': 'Vitória (Versão Antiga - Validação)',
-                'recomendacao': r['Recomendacao'],
-                'score_confianca': r['Score'],
-                'odd': float(r['Odds'])
-            })
-        return resultados
-    except Exception as e:
-        st.error(f"Erro ao processar Robô Antigo de Vitória: {e}")
+            res.append({'hora': str(r['Hour'])[-5:], 'jogo': f"{fix_str(r['Home_Team'])} vs {fix_str(r['Visitor_Team'])}", 'liga': f"{fix_str(r['Country'])} - {fix_str(r['League'])}", 'script': 'Vitória (Versão Antiga - Validação)', 'recomendacao': r['Recomendacao'], 'score_confianca': r['Score'], 'odd': float(r['Odds'])})
+        return res
+    except:
         return []
 
 # --- CARREGADOR UNIFICADO DO ROBÔ DE VITÓRIA ---
@@ -488,56 +366,28 @@ def carregar_dados_vitoria(win_file, conf_file, cfg):
     df_win = pd.read_csv(win_file, sep=";", encoding='latin-1')
     df_conf = pd.read_csv(conf_file, sep=";", encoding='latin-1')
 
-    col_names_win = [
-        "Country", "Short", "League", "Hour", "Status", "Home_Team", "Result_Home", "Result_Visitor", "Visitor_Team",
-        "Odds_Home", "Odds_Away", "Win_Pct_Home", "Win_Pct_Away", "Efficiency_Home", "Efficiency_Away",
-        "Games_Home", "Games_Away", "ExG", "Pressure_Home", "Pressure_Away", "Attacks_Min_Home", "Attacks_Min_Away",
-        "Shots_Scored_Home", "Shots_Scored_Away", "Shots_Conceded_Home", "Shots_Conceded_Away",
-        "ShotsOnTarget_Scored_Home", "ShotsOnTarget_Scored_Away", "ShotsOnTarget_Conceded_Home", "ShotsOnTarget_Conceded_Away",
-        "Possession_Home", "Possession_Away", "Goals_Scored_Home", "Goals_Scored_Away", "Goals_Conceded_Home", "Goals_Conceded_Away"
-    ]
+    col_names_win = ["Country", "Short", "League", "Hour", "Status", "Home_Team", "Result_Home", "Result_Visitor", "Visitor_Team", "Odds_Home", "Odds_Away", "Win_Pct_Home", "Win_Pct_Away", "Efficiency_Home", "Efficiency_Away", "Games_Home", "Games_Away", "ExG", "Pressure_Home", "Pressure_Away", "Attacks_Min_Home", "Attacks_Min_Away", "Shots_Scored_Home", "Shots_Scored_Away", "Shots_Conceded_Home", "Shots_Conceded_Away", "ShotsOnTarget_Scored_Home", "ShotsOnTarget_Scored_Away", "ShotsOnTarget_Conceded_Home", "ShotsOnTarget_Conceded_Away", "Possession_Home", "Possession_Away", "Goals_Scored_Home", "Goals_Scored_Away", "Goals_Conceded_Home", "Goals_Conceded_Away"]
     df_win.columns = col_names_win[: len(df_win.columns)]
 
-    col_names_conf = [
-        "Country", "Short", "League", "Hour", "Status", "Home_Team", "Result_Home", "Result_Visitor", "Visitor_Team",
-        "H2H_Games", "H2H_Win_Pct_Home", "H2H_Win_Pct_Away"
-    ]
+    col_names_conf = ["Country", "Short", "League", "Hour", "Status", "Home_Team", "Result_Home", "Result_Visitor", "Visitor_Team", "H2H_Games", "H2H_Win_Pct_Home", "H2H_Win_Pct_Away"]
     df_conf.columns = col_names_conf[: len(df_conf.columns)]
 
-    merged = pd.merge(
-        df_win,
-        df_conf[["Home_Team", "Visitor_Team", "League", "Hour", "H2H_Games", "H2H_Win_Pct_Home", "H2H_Win_Pct_Away"]],
-        on=["Home_Team", "Visitor_Team", "League", "Hour"],
-        how="inner"
-    )
-
+    merged = pd.merge(df_win, df_conf[["Home_Team", "Visitor_Team", "League", "Hour", "H2H_Games", "H2H_Win_Pct_Home", "H2H_Win_Pct_Away"]], on=["Home_Team", "Visitor_Team", "League", "Hour"], how="inner")
     num_cols = [c for c in merged.columns if c not in ["Country", "Short", "League", "Hour", "Status", "Home_Team", "Visitor_Team"]]
     for col in num_cols:
         if merged[col].dtype == object:
             merged[col] = merged[col].astype(str).str.replace('%', '', regex=False).str.replace(',', '.', regex=False)
         merged[col] = pd.to_numeric(merged[col], errors="coerce")
 
-    cols_vit_checar = ["Efficiency_Home", "Efficiency_Away", "Games_Home", "Games_Away", "Goals_Scored_Home", "Goals_Scored_Away"]
-    merged = merged[~(merged[cols_vit_checar] == -1).any(axis=1)].copy()
+    merged = merged[~(merged[["Efficiency_Home", "Efficiency_Away", "Games_Home", "Games_Away", "Goals_Scored_Home", "Goals_Scored_Away"]] == -1).any(axis=1)].copy()
     merged[num_cols] = merged[num_cols].fillna(0.0)
 
     df_clean = merged[(merged["Games_Home"] >= 8) & (merged["Games_Away"] >= 8)].copy()
-    df_clean = filtrar_blacklist(df_clean, 'League', 'Home_Team', 'Visitor_Team', cfg)
-    
-    return df_clean
+    return filtrar_blacklist(df_clean, 'League', 'Home_Team', 'Visitor_Team', cfg)
 
 # --- NAVEGAÇÃO STREAMLIT ---
 st.sidebar.title("⚽ Robô Pro de Futebol")
-aba = st.sidebar.radio(
-    "Navegação", 
-    [
-        "1. Análise de Arquivos", 
-        "2. Gerenciar Entradas (Novas)", 
-        "3. Apostas em Andamento", 
-        "4. Dashboard Financeiro",
-        "5. Parâmetros & Configurações"
-    ]
-)
+aba = st.sidebar.radio("Navegação", ["1. Análise de Arquivos", "2. Gerenciar Entradas (Novas)", "3. Apostas em Andamento", "4. Dashboard Financeiro", "5. Parâmetros & Configurações"])
 
 configs_atuais = carregar_configuracoes()
 
@@ -546,8 +396,6 @@ configs_atuais = carregar_configuracoes()
 # ---------------------------------------------------------
 if aba == "1. Análise de Arquivos":
     st.header("📥 Upload dos Arquivos PackBall")
-    st.write("Envie os arquivos CSV do dia para gerar as oportunidades com base nos seus parâmetros configurados.")
-
     c1, c2 = st.columns(2)
     with c1:
         f_cantos = st.file_uploader("Arquivo de Cantos", key="cantos")
@@ -561,78 +409,55 @@ if aba == "1. Análise de Arquivos":
         cfg_default = {'top_n': 10, 'permitir_copas': False, 'permitir_sub20': False, 'permitir_feminino': False}
 
         if f_cantos:
-            res = processar_cantos(f_cantos, configs_atuais.get('Cantos (Over 9.5)', cfg_default))
-            todas_oportunidades.extend(res)
-
+            todas_oportunidades.extend(processar_cantos(f_cantos, configs_atuais.get('Cantos (Over 9.5)', cfg_default)))
         if f_gols:
-            cfg_g25 = configs_atuais.get('Gols (Over 2.5)', cfg_default)
-            cfg_g15 = configs_atuais.get('Gols (Over 1.5)', cfg_default)
-            res = processar_gols(f_gols, cfg_g25, cfg_g15)
-            todas_oportunidades.extend(res)
-
+            todas_oportunidades.extend(processar_gols(f_gols, configs_atuais.get('Gols (Over 2.5)', cfg_default), configs_atuais.get('Gols (Over 1.5)', cfg_default)))
         if f_win and f_conf:
             cfg_win_novo = configs_atuais.get('Vitória / Dominância (Novo)', cfg_default)
             df_vitoria_base = carregar_dados_vitoria(f_win, f_conf, cfg_win_novo)
             
-            # 1. NOVO ROBÔ (Top 10 Reais)
-            res_novo = processar_vitoria_novo(df_vitoria_base, cfg_win_novo)
-            todas_oportunidades.extend(res_novo)
-
-            # 2. ROBÔ ANTIGO (Top 10 Antigos para Validação)
-            cfg_old = configs_atuais.get('Vitória (Versão Antiga - Validação)', cfg_default)
-            res_antigo = processar_vitoria_antigo(df_vitoria_base, cfg_old)
+            todas_oportunidades.extend(processar_vitoria_novo(df_vitoria_base, cfg_win_novo))
             
-            st.session_state['vitoria_sombra_temp'] = res_antigo
+            # Robô Antigo roda silenciosamente para a "gaveta" de validação
+            st.session_state['vitoria_sombra_temp'] = processar_vitoria_antigo(df_vitoria_base, configs_atuais.get('Vitória (Versão Antiga - Validação)', cfg_default))
 
         if todas_oportunidades:
             st.session_state['oportunidades_temp'] = todas_oportunidades
             st.success(f"Foram encontradas {len(todas_oportunidades)} oportunidades reais de aposta!")
         else:
             st.session_state['oportunidades_temp'] = []
-            st.warning("Nenhuma oportunidade encontrada com os critérios definidos.")
+            st.warning("Nenhuma oportunidade encontrada.")
 
     if 'oportunidades_temp' in st.session_state and st.session_state['oportunidades_temp']:
-        st.subheader("📋 Recomendações Unificadas para Entradas (Novo Robô + Gols + Cantos)")
-        df_res = pd.DataFrame(st.session_state['oportunidades_temp'])
-        st.dataframe(df_res, use_container_width=True)
-
-        if 'vitoria_sombra_temp' in st.session_state and st.session_state['vitoria_sombra_temp']:
-            with st.expander("👁️ Ver Top 10 Oportunidades do Robô Vitória Antigo (Apenas para Comparação Sombra)", expanded=True):
-                st.write("Estas entradas serão salvas automaticamente para compor os dados do Dashboard sem exigir que você clique nelas.")
-                st.dataframe(pd.DataFrame(st.session_state['vitoria_sombra_temp']), use_container_width=True)
+        st.subheader("📋 Recomendações Unificadas para Entradas")
+        st.dataframe(pd.DataFrame(st.session_state['oportunidades_temp']), use_container_width=True)
 
         if st.button("💾 Enviar Oportunidades para Gestão de Banca", use_container_width=True):
             conn = sqlite3.connect("oportunidades.db")
             c = conn.cursor()
             data_hoje = date.today().isoformat()
             
-            # 1. Insere as Reais na gestão (Status Pendente)
             sql_insert = "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, score_confianca, odd_sugerida, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendente')"
             for item in st.session_state['oportunidades_temp']:
-                score_str = str(item.get('score_confianca', 'N/A'))
-                c.execute(sql_insert, (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], score_str, item['odd']))
+                c.execute(sql_insert, (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], str(item.get('score_confianca', 'N/A')), item['odd']))
             
-            # 2. Insere as do Robô Antigo direto como Sombra (Status 'Em Andamento (Sombra)')
             if 'vitoria_sombra_temp' in st.session_state:
-                stake_antiga = configs_atuais.get('Vitória (Versão Antiga - Validação)', {}).get('stake_padrao', 50.0)
                 sql_sombra = "INSERT INTO entradas (data_registro, hora, jogo, liga, script_origem, recomendacao, score_confianca, odd_sugerida, odd_comprada, valor_apostado, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Andamento (Sombra)')"
+                stake_antiga = configs_atuais.get('Vitória (Versão Antiga - Validação)', {}).get('stake_padrao', 50.0)
                 for item in st.session_state['vitoria_sombra_temp']:
-                    score_str = str(item.get('score_confianca', 'N/A'))
-                    c.execute(sql_sombra, (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], score_str, item['odd'], item['odd'], stake_antiga))
+                    c.execute(sql_sombra, (data_hoje, item['hora'], item['jogo'], item['liga'], item['script'], item['recomendacao'], str(item.get('score_confianca', 'N/A')), item['odd'], item['odd'], stake_antiga))
 
             conn.commit()
             conn.close()
             st.session_state['oportunidades_temp'] = []
             st.session_state['vitoria_sombra_temp'] = []
-            st.success("✅ Oportunidades enviadas! As entradas do Robô Antigo já estão sendo monitoradas para o Dashboard Comparativo.")
+            st.success("✅ Oportunidades enviadas com sucesso!")
 
 # ---------------------------------------------------------
 # ABA 2: GERENCIAR ENTRADAS NOVAS
 # ---------------------------------------------------------
 elif aba == "2. Gerenciar Entradas (Novas)":
     st.header("🎯 Sugestões Pendentes por Estratégia")
-    st.write("Confirme o valor e odd apostados para enviar para **Apostas em Andamento**, ou exclua se não for realizar.")
-
     conn = sqlite3.connect("oportunidades.db")
     df_entradas = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'pendente' ORDER BY script_origem ASC, hora ASC", conn)
 
@@ -641,45 +466,25 @@ elif aba == "2. Gerenciar Entradas (Novas)":
     else:
         for estrategia, grupo in df_entradas.groupby('script_origem'):
             stake_padrao = configs_atuais.get(estrategia, {}).get('stake_padrao', 50.0)
-            
             with st.expander(f"📁 {estrategia} ({len(grupo)} oportunidades)", expanded=True):
                 for idx, row in grupo.iterrows():
-                    score_val = row['score_confianca'] if 'score_confianca' in row and pd.notnull(row['score_confianca']) and str(row['score_confianca']).strip() != '' else 'N/A'
                     st.markdown(f"##### ⏰ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
-                    
                     col_info, col_inputs, col_botoes = st.columns([2.5, 2.5, 1.5])
-
                     with col_info:
                         st.write(f"**Liga:** {row['liga']}")
-                        st.write(f"**Odd Sugerida:** {row['odd_sugerida']:.2f}")
-                        st.write(f"🔥 **Score / Confiança:** `{score_val}`")
-
+                        st.write(f"**Odd Sugerida:** {row['odd_sugerida']:.2f} | **Confiança:** `{row['score_confianca']}`")
                     with col_inputs:
-                        key_odd = f"odd_{row['id']}"
-                        key_val = f"val_{row['id']}"
-                        odd_comprada = st.number_input("Odd Real Comprada:", value=float(row['odd_sugerida']), step=0.01, key=key_odd)
-                        valor_apostado = st.number_input("Valor Apostado (R$):", value=float(stake_padrao), step=5.0, key=key_val)
-
+                        odd_comprada = st.number_input("Odd Real Comprada:", value=float(row['odd_sugerida']), step=0.01, key=f"odd_{row['id']}")
+                        valor_apostado = st.number_input("Valor Apostado (R$):", value=float(stake_padrao), step=5.0, key=f"val_{row['id']}")
                     with col_botoes:
-                        key_conf = f"conf_{row['id']}"
-                        key_del = f"del_{row['id']}"
-                        
-                        btn_confirmar = st.button("📌 Confirmar Aposta", key=key_conf, use_container_width=True)
-                        if btn_confirmar:
-                            c = conn.cursor()
-                            sql_update = "UPDATE entradas SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? WHERE id = ?"
-                            c.execute(sql_update, (odd_comprada, valor_apostado, row['id']))
+                        if st.button("📌 Confirmar", key=f"conf_{row['id']}", use_container_width=True):
+                            conn.execute("UPDATE entradas SET status = 'Em Andamento', odd_comprada = ?, valor_apostado = ? WHERE id = ?", (odd_comprada, valor_apostado, row['id']))
                             conn.commit()
-                            st.toast("Aposta enviada para Apostas em Andamento!")
+                            st.toast("Aposta ativada!")
                             st.rerun()
-
-                        btn_descartar = st.button("🗑️ Descartar", key=key_del, use_container_width=True)
-                        if btn_descartar:
-                            c = conn.cursor()
-                            sql_delete = "DELETE FROM entradas WHERE id = ?"
-                            c.execute(sql_delete, (row['id'],))
+                        if st.button("🗑️ Descartar", key=f"del_{row['id']}", use_container_width=True):
+                            conn.execute("DELETE FROM entradas WHERE id = ?", (row['id'],))
                             conn.commit()
-                            st.toast("Entrada descartada!")
                             st.rerun()
                     st.divider()
     conn.close()
@@ -689,300 +494,274 @@ elif aba == "2. Gerenciar Entradas (Novas)":
 # ---------------------------------------------------------
 elif aba == "3. Apostas em Andamento":
     st.header("⏳ Apostas Confirmadas (Aguardando Resultado)")
-
     conn = sqlite3.connect("oportunidades.db")
     df_andamento = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) = 'em andamento' ORDER BY script_origem ASC, hora ASC", conn)
 
     if df_andamento.empty:
-        st.info("Nenhuma aposta em andamento no momento!")
+        st.info("Nenhuma aposta real em andamento.")
     else:
         for estrategia, grupo in df_andamento.groupby('script_origem'):
-            with st.expander(f"📁 {estrategia} ({len(grupo)} apostas ativas)", expanded=True):
+            with st.expander(f"📁 {estrategia} ({len(grupo)} ativas)", expanded=True):
                 for idx, row in grupo.iterrows():
-                    score_val = row['score_confianca'] if 'score_confianca' in row and pd.notnull(row['score_confianca']) and str(row['score_confianca']).strip() != '' else 'N/A'
                     st.markdown(f"##### ⚽ [{row['hora']}] {row['jogo']} - *{row['recomendacao']}*")
-                    
                     col_info, col_botoes = st.columns([3, 2])
-
                     with col_info:
                         st.write(f"**Liga:** {row['liga']}")
-                        st.write(f"**Valor Apostado:** R$ {row['valor_apostado']:.2f} | **Odd Comprada:** {row['odd_comprada']:.2f}")
-                        st.write(f"🔥 **Score / Confiança:** `{score_val}`")
-
+                        st.write(f"**Apostado:** R$ {row['valor_apostado']:.2f} | **Odd:** {row['odd_comprada']:.2f}")
                     with col_botoes:
-                        key_green = f"green_and_{row['id']}"
-                        key_red = f"red_and_{row['id']}"
-                        key_null = f"null_and_{row['id']}"
-
-                        btn_green = st.button("🟢 Green", key=key_green, use_container_width=True)
-                        if btn_green:
+                        if st.button("🟢 Green", key=f"g_{row['id']}", use_container_width=True):
                             lucro = (row['odd_comprada'] - 1) * row['valor_apostado']
-                            c = conn.cursor()
-                            
-                            # 1. Atualiza Aposta Real
-                            sql_g = "UPDATE entradas SET status = 'Green', lucro_prejuizo = ? WHERE id = ?"
-                            c.execute(sql_g, (lucro, row['id']))
-
-                            # 2. Se for o Robô de Vitória Novo, também atualiza o Robô Antigo (se ele sugeriu o mesmo jogo)
-                            sql_sombra_g = """
-                                UPDATE entradas 
-                                SET status = 'Green', lucro_prejuizo = (odd_comprada - 1) * valor_apostado 
-                                WHERE jogo = ? AND status = 'Em Andamento (Sombra)' AND script_origem = 'Vitória (Versão Antiga - Validação)'
-                            """
-                            c.execute(sql_sombra_g, (row['jogo'],))
-
+                            conn.execute("UPDATE entradas SET status = 'Green', lucro_prejuizo = ? WHERE id = ?", (lucro, row['id']))
+                            conn.execute("UPDATE entradas SET status = 'Green', lucro_prejuizo = (odd_comprada - 1) * valor_apostado WHERE jogo = ? AND status = 'Em Andamento (Sombra)'", (row['jogo'],))
                             conn.commit()
-                            st.toast(f"Green registrado com sucesso! (+R$ {lucro:.2f})")
+                            st.toast("Green!")
                             st.rerun()
-
-                        btn_red = st.button("🔴 Red", key=key_red, use_container_width=True)
-                        if btn_red:
-                            prejuizo = -row['valor_apostado']
-                            c = conn.cursor()
-                            
-                            # 1. Atualiza Aposta Real
-                            sql_r = "UPDATE entradas SET status = 'Red', lucro_prejuizo = ? WHERE id = ?"
-                            c.execute(sql_r, (prejuizo, row['id']))
-
-                            # 2. Atualiza o Robô Antigo em Sombra
-                            sql_sombra_r = """
-                                UPDATE entradas 
-                                SET status = 'Red', lucro_prejuizo = -valor_apostado 
-                                WHERE jogo = ? AND status = 'Em Andamento (Sombra)' AND script_origem = 'Vitória (Versão Antiga - Validação)'
-                            """
-                            c.execute(sql_sombra_r, (row['jogo'],))
-
+                        if st.button("🔴 Red", key=f"r_{row['id']}", use_container_width=True):
+                            conn.execute("UPDATE entradas SET status = 'Red', lucro_prejuizo = ? WHERE id = ?", (-row['valor_apostado'], row['id']))
+                            conn.execute("UPDATE entradas SET status = 'Red', lucro_prejuizo = -valor_apostado WHERE jogo = ? AND status = 'Em Andamento (Sombra)'", (row['jogo'],))
                             conn.commit()
-                            st.toast(f"Red registrado. (-R$ {row['valor_apostado']:.2f})")
+                            st.toast("Red!")
                             st.rerun()
-
-                        btn_null = st.button("⚪ Anular / Reembolso", key=key_null, use_container_width=True)
-                        if btn_null:
-                            c = conn.cursor()
-                            sql_n = "UPDATE entradas SET status = 'Anulada', lucro_prejuizo = 0 WHERE id = ?"
-                            c.execute(sql_n, (row['id'],))
-
-                            sql_sombra_n = """
-                                UPDATE entradas 
-                                SET status = 'Anulada', lucro_prejuizo = 0 
-                                WHERE jogo = ? AND status = 'Em Andamento (Sombra)' AND script_origem = 'Vitória (Versão Antiga - Validação)'
-                            """
-                            c.execute(sql_sombra_n, (row['jogo'],))
-
+                        if st.button("⚪ Anular", key=f"n_{row['id']}", use_container_width=True):
+                            conn.execute("UPDATE entradas SET status = 'Anulada', lucro_prejuizo = 0 WHERE id = ?", (row['id'],))
+                            conn.execute("UPDATE entradas SET status = 'Anulada', lucro_prejuizo = 0 WHERE jogo = ? AND status = 'Em Andamento (Sombra)'", (row['jogo'],))
                             conn.commit()
-                            st.toast("Entrada Anulada!")
                             st.rerun()
                     st.divider()
     conn.close()
 
 # ---------------------------------------------------------
-# ABA 4: DASHBOARD FINANCEIRO
+# ABA 4: DASHBOARD FINANCEIRO (COMPLETO E ANALÍTICO)
 # ---------------------------------------------------------
 elif aba == "4. Dashboard Financeiro":
-    st.header("📊 Painel de Desempenho Financeiro")
+    st.header("📊 Painel de Desempenho Analítico (Seu Dinheiro Real)")
 
     conn = sqlite3.connect("oportunidades.db")
-    df_hist = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) IN ('green', 'red', 'anulada')", conn)
+    df_hist_full = pd.read_sql_query("SELECT * FROM entradas WHERE LOWER(TRIM(status)) IN ('green', 'red', 'anulada')", conn)
 
-    if df_hist.empty:
+    if df_hist_full.empty:
         st.info("Nenhuma aposta finalizada no histórico para gerar métricas.")
         conn.close()
     else:
+        # Filtros no topo
         st.subheader("🔍 Filtros de Análise")
         f1, f2 = st.columns(2)
 
         with f1:
-            opcao_data = st.selectbox("Período:", ["Hoje", "Últimos 7 dias", "Mês Atual", "Todo o Histórico", "Personalizado"])
+            opcao_data = st.selectbox("Período:", ["Mês Atual", "Hoje", "Últimos 7 dias", "Todo o Histórico"])
             hoje = date.today()
-
-            if opcao_data == "Hoje":
-                d_inicio, d_fim = hoje, hoje
-            elif opcao_data == "Últimos 7 dias":
-                d_inicio, d_fim = hoje - pd.Timedelta(days=7), hoje
-            elif opcao_data == "Mês Atual":
-                d_inicio, d_fim = date(hoje.year, hoje.month, 1), hoje
-            elif opcao_data == "Todo o Histórico":
-                d_inicio, d_fim = date(2020, 1, 1), hoje
-            else:
-                d_inicio = st.date_input("Data Inicial:", hoje)
-                d_fim = st.date_input("Data Final:", hoje)
+            if opcao_data == "Hoje": d_inicio, d_fim = hoje, hoje
+            elif opcao_data == "Últimos 7 dias": d_inicio, d_fim = hoje - pd.Timedelta(days=7), hoje
+            elif opcao_data == "Mês Atual": d_inicio, d_fim = date(hoje.year, hoje.month, 1), hoje
+            else: d_inicio, d_fim = date(2020, 1, 1), hoje
 
         with f2:
-            estrategias_disponiveis = ["Todas as Estratégias (Apenas Reais)", "Todas as Estratégias (Com Sombra/Antiga)"] + list(df_hist['script_origem'].unique())
-            est_selecionada = st.selectbox("Estratégia:", estrategias_disponiveis)
+            estrategias_reais = [e for e in df_hist_full['script_origem'].unique() if e != 'Vitória (Versão Antiga - Validação)']
+            est_selecionada = st.selectbox("Estratégia:", ["Todas as Estratégias Reais"] + estrategias_reais)
 
-        df_hist['data_registro'] = df_hist['data_registro'].fillna(hoje.isoformat())
-        df_hist['data_dt'] = pd.to_datetime(df_hist['data_registro'], errors='coerce').dt.date
-        df_hist['data_dt'] = df_hist['data_dt'].fillna(hoje)
+        # Tratamento de Datas
+        df_hist_full['data_registro'] = df_hist_full['data_registro'].fillna(hoje.isoformat())
+        df_hist_full['data_dt'] = pd.to_datetime(df_hist_full['data_registro'], errors='coerce').dt.date
+        df_hist_full['data_dt'] = df_hist_full['data_dt'].fillna(hoje)
 
-        mask_data = (df_hist['data_dt'] >= d_inicio) & (df_hist['data_dt'] <= d_fim)
-        df_filtrado = df_hist[mask_data].copy()
+        # Filtrando Data
+        mask_data = (df_hist_full['data_dt'] >= d_inicio) & (df_hist_full['data_dt'] <= d_fim)
+        df_filtrado_data = df_hist_full[mask_data].copy()
 
-        if est_selecionada == "Todas as Estratégias (Apenas Reais)":
-            df_filtrado = df_filtrado[df_filtrado['script_origem'] != 'Vitória (Versão Antiga - Validação)'].copy()
-        elif est_selecionada not in ["Todas as Estratégias (Com Sombra/Antiga)"]:
-            df_filtrado = df_filtrado[df_filtrado['script_origem'] == est_selecionada].copy()
+        # Separando os dados reais dos dados do robô sombra
+        df_real = df_filtrado_data[df_filtrado_data['script_origem'] != 'Vitória (Versão Antiga - Validação)'].copy()
+        df_sombra = df_filtrado_data[df_filtrado_data['script_origem'] == 'Vitória (Versão Antiga - Validação)'].copy()
+
+        # Filtrando Estratégia no Dashboard Principal
+        if est_selecionada != "Todas as Estratégias Reais":
+            df_real = df_real[df_real['script_origem'] == est_selecionada]
 
         st.divider()
 
-        if df_filtrado.empty:
-            st.warning("Nenhum resultado registrado para o período ou estratégia selecionada.")
+        if df_real.empty:
+            st.warning("Nenhum dado real registrado para os filtros selecionados.")
         else:
-            total_apostas = len(df_filtrado[df_filtrado['status'].str.strip().str.title().isin(['Green', 'Red'])])
-            greens = len(df_filtrado[df_filtrado['status'].str.strip().str.title() == 'Green'])
-            reds = len(df_filtrado[df_filtrado['status'].str.strip().str.title() == 'Red'])
+            # --- 1. KPIs Principais ---
+            df_resolvido = df_real[df_real['status'].str.strip().str.title().isin(['Green', 'Red'])]
+            total_apostas = len(df_resolvido)
+            greens = len(df_resolvido[df_resolvido['status'].str.strip().str.title() == 'Green'])
+            reds = total_apostas - greens
             winrate = (greens / total_apostas * 100) if total_apostas > 0 else 0
-
-            total_investido = df_filtrado['valor_apostado'].sum()
-            lucro_total = df_filtrado['lucro_prejuizo'].sum()
+            total_investido = df_real['valor_apostado'].sum()
+            lucro_total = df_real['lucro_prejuizo'].sum()
             roi = (lucro_total / total_investido * 100) if total_investido > 0 else 0
 
-            df_dd_calc = df_filtrado.sort_values('data_registro').copy()
-            df_dd_calc['Lucro_Acum'] = df_dd_calc['lucro_prejuizo'].cumsum()
-            df_dd_calc['Pico'] = df_dd_calc['Lucro_Acum'].cummax()
-            df_dd_calc['Drawdown'] = df_dd_calc['Lucro_Acum'] - df_dd_calc['Pico']
-            max_drawdown = df_dd_calc['Drawdown'].min() if not df_dd_calc.empty else 0.0
+            # Cálculo de Drawdown
+            df_real_dd = df_real.sort_values('data_registro').copy()
+            df_real_dd['Lucro_Acum'] = df_real_dd['lucro_prejuizo'].cumsum()
+            df_real_dd['Pico'] = df_real_dd['Lucro_Acum'].cummax()
+            df_real_dd['Drawdown'] = df_real_dd['Lucro_Acum'] - df_real_dd['Pico']
+            max_drawdown = df_real_dd['Drawdown'].min() if not df_real_dd.empty else 0.0
 
             c1, c2, c3, c4, c5, c6 = st.columns(6)
-            c1.metric("Entradas", total_apostas)
-            c2.metric("🟢 G / 🔴 R", f"{greens} / {reds}")
+            c1.metric("Total Entradas", total_apostas)
+            c2.metric("🟢 Green / 🔴 Red", f"{greens} / {reds}")
             c3.metric("Assertividade", f"{winrate:.1f}%")
-            c4.metric("Investido", f"R$ {total_investido:.2f}")
+            c4.metric("Valor Investido", f"R$ {total_investido:.2f}")
             c5.metric("Lucro Líquido", f"R$ {lucro_total:.2f}", delta=f"{roi:.1f}% ROI")
             c6.metric("Max Drawdown", f"R$ {max_drawdown:.2f}")
-
             st.divider()
 
-            # --- Duelo de Robôs (Novo vs Antigo) ---
-            st.subheader("⚔️ Duelo de Desempenho: Robô Vitória Novo vs Robô Vitória Antigo")
-            df_nov = df_hist[(df_hist['script_origem'] == 'Vitória / Dominância (Novo)') & mask_data]
-            df_ant = df_hist[(df_hist['script_origem'] == 'Vitória (Versão Antiga - Validação)') & mask_data]
+            # --- 2. Gráficos de Evolução (Layout com 2 colunas) ---
+            g_col1, g_col2 = st.columns(2)
+            with g_col1:
+                st.markdown("**📈 Evolução Acumulada do Lucro/Prejuízo**")
+                df_evolucao = df_real.groupby('data_registro')['lucro_prejuizo'].sum().cumsum()
+                st.line_chart(df_evolucao)
 
-            cv1, cv2 = st.columns(2)
-            with cv1:
-                st.markdown("##### 🚀 Novo Robô Vitória (Poisson Híbrido)")
-                t_n = len(df_nov[df_nov['status'].str.strip().str.title().isin(['Green', 'Red'])])
-                g_n = len(df_nov[df_nov['status'].str.strip().str.title() == 'Green'])
-                wr_n = (g_n / t_n * 100) if t_n > 0 else 0
-                luc_n = df_nov['lucro_prejuizo'].sum()
-                st.metric("Entradas", t_n)
-                st.metric("Assertividade", f"{wr_n:.1f}%")
-                st.metric("Lucro Acumulado", f"R$ {luc_n:.2f}")
-
-            with cv2:
-                st.markdown("##### 📜 Robô Vitória Antigo (Análise Original em Sombra)")
-                t_a = len(df_ant[df_ant['status'].str.strip().str.title().isin(['Green', 'Red'])])
-                g_a = len(df_ant[df_ant['status'].str.strip().str.title() == 'Green'])
-                wr_a = (g_a / t_a * 100) if t_a > 0 else 0
-                luc_a = df_ant['lucro_prejuizo'].sum()
-                st.metric("Entradas", t_a)
-                st.metric("Assertividade", f"{wr_a:.1f}%")
-                st.metric("Lucro Acumulado", f"R$ {luc_a:.2f}")
-
-            st.divider()
-
-            st.subheader("📈 Evolução Financeira Acumulada")
-            df_chart = df_filtrado.groupby(['data_registro', 'script_origem'])['lucro_prejuizo'].sum().unstack(fill_value=0)
-            df_chart_cum = df_chart.cumsum()
-            st.line_chart(df_chart_cum)
-
-            st.divider()
-
-            st.subheader("📊 Performance Comparativa Global das Estratégias")
-            perf_list = []
-            for script, group in df_filtrado.groupby('script_origem'):
-                tot = len(group[group['status'].str.strip().str.title().isin(['Green', 'Red'])])
-                g = len(group[group['status'].str.strip().str.title() == 'Green'])
-                r = len(group[group['status'].str.strip().str.title() == 'Red'])
-                wr = (g / tot * 100) if tot > 0 else 0
-                inv = group['valor_apostado'].sum()
-                luc = group['lucro_prejuizo'].sum()
-                roi_script = (luc / inv * 100) if inv > 0 else 0
-                perf_list.append({
-                    'Estratégia': script,
-                    'Entradas': tot,
-                    'Greens': g,
-                    'Reds': r,
-                    'Assertividade (%)': f"{wr:.1f}%",
-                    'Investimento (R$)': inv,
-                    'Lucro Líquido (R$)': luc,
-                    'ROI (%)': roi_script
-                })
+            with g_col2:
+                st.markdown("**📊 Resultado Financeiro Diário (R$)**")
+                df_diario = df_real.groupby('data_registro')['lucro_prejuizo'].sum()
+                st.bar_chart(df_diario)
             
-            df_perf = pd.DataFrame(perf_list)
-            if not df_perf.empty:
-                st.dataframe(
-                    df_perf.style.format({
-                        'Investimento (R\()': 'R\) {:.2f}',
-                        'Lucro Líquido (R\()': 'R\) {:.2f}',
-                        'ROI (%)': '{:.1f}%'
-                    }).map(colorir_lucro, subset=['Lucro Líquido (R$)', 'ROI (%)']),
-                    use_container_width=True
-                )
+            st.divider()
+
+            # --- 3. Tabelas Analíticas Avançadas (Estratégias e Ligas) ---
+            t_col1, t_col2 = st.columns(2)
+            
+            with t_col1:
+                st.subheader("🛠️ Desempenho por Estratégia")
+                perf_estrategia = []
+                for script, group in df_real.groupby('script_origem'):
+                    g_res = group[group['status'].str.strip().str.title().isin(['Green', 'Red'])]
+                    tot = len(g_res)
+                    g = len(g_res[g_res['status'].str.strip().str.title() == 'Green'])
+                    inv = group['valor_apostado'].sum()
+                    luc = group['lucro_prejuizo'].sum()
+                    perf_estrategia.append({
+                        'Estratégia': script,
+                        'Entradas': tot,
+                        'Winrate': f"{(g/tot*100):.1f}%" if tot > 0 else "0.0%",
+                        'Lucro Líquido': luc,
+                        'ROI': f"{(luc/inv*100):.1f}%" if inv > 0 else "0.0%"
+                    })
+                df_perf_estr = pd.DataFrame(perf_estrategia)
+                st.dataframe(df_perf_estr.style.format({'Lucro Líquido': 'R$ {:.2f}'}).map(colorir_lucro, subset=['Lucro Líquido']), use_container_width=True)
+
+            with t_col2:
+                st.subheader("🌍 Desempenho por Liga (Top Ligas)")
+                perf_ligas = []
+                for liga, group in df_real.groupby('liga'):
+                    g_res = group[group['status'].str.strip().str.title().isin(['Green', 'Red'])]
+                    tot = len(g_res)
+                    g = len(g_res[g_res['status'].str.strip().str.title() == 'Green'])
+                    luc = group['lucro_prejuizo'].sum()
+                    if tot > 0:
+                        perf_ligas.append({
+                            'Liga': liga,
+                            'Jogos': tot,
+                            'Winrate': f"{(g/tot*100):.0f}%",
+                            'Lucro': luc
+                        })
+                df_perf_ligas = pd.DataFrame(perf_ligas).sort_values('Lucro', ascending=False)
+                st.dataframe(df_perf_ligas.style.format({'Lucro': 'R$ {:.2f}'}).map(colorir_lucro, subset=['Lucro']), use_container_width=True)
 
             st.divider()
 
-            st.subheader("📋 Histórico Detalhado do Período Selecionado")
-            cols_exibir = ['id', 'data_registro', 'hora', 'jogo', 'script_origem', 'recomendacao', 'score_confianca', 'odd_comprada', 'valor_apostado', 'lucro_prejuizo', 'status']
-            cols_existentes = [c for c in cols_exibir if c in df_filtrado.columns]
-            df_historico_view = df_filtrado[cols_existentes].copy()
+            # --- 4. Análise por Faixa de Odd e Dia da Semana ---
+            o_col1, o_col2 = st.columns(2)
             
+            with o_col1:
+                st.subheader("🎯 Desempenho por Faixa de Odd")
+                bins = [1.0, 1.49, 1.79, 2.19, 3.0, 10.0]
+                labels = ['Até 1.49', '1.50 a 1.79', '1.80 a 2.19', '2.20 a 3.00', '3.01+']
+                df_odds = df_real.copy()
+                df_odds['Faixa_Odd'] = pd.cut(df_odds['odd_comprada'], bins=bins, labels=labels, right=True)
+                
+                perf_odds = []
+                for faixa, group in df_odds.groupby('Faixa_Odd', observed=False):
+                    g_res = group[group['status'].str.strip().str.title().isin(['Green', 'Red'])]
+                    tot = len(g_res)
+                    g = len(g_res[g_res['status'].str.strip().str.title() == 'Green'])
+                    luc = group['lucro_prejuizo'].sum()
+                    if tot > 0:
+                        perf_odds.append({'Faixa de Odd': faixa, 'Entradas': tot, 'Winrate': f"{(g/tot*100):.1f}%", 'Lucro': luc})
+                
+                df_perf_odds = pd.DataFrame(perf_odds)
+                if not df_perf_odds.empty:
+                    st.dataframe(df_perf_odds.style.format({'Lucro': 'R$ {:.2f}'}).map(colorir_lucro, subset=['Lucro']), use_container_width=True)
+
+            with o_col2:
+                st.subheader("📅 Histórico Bruto Recente")
+                cols_exibir = ['data_registro', 'jogo', 'odd_comprada', 'lucro_prejuizo', 'status']
+                df_hist_view = df_real[cols_exibir].sort_values('data_registro', ascending=False).head(20)
+                st.dataframe(df_hist_view.style.format({'odd_comprada': '{:.2f}', 'lucro_prejuizo': 'R$ {:.2f}'}).map(colorir_lucro, subset=['lucro_prejuizo']), use_container_width=True)
+
+        # ---------------------------------------------------------------------------------
+        # GAVETA ISOLADA: CONFERÊNCIA DO ROBÔ ANTIGO (APENAS PARA CONSULTA)
+        # ---------------------------------------------------------------------------------
+        st.markdown("
+
+
+", unsafe_allow_html=True)
+with st.expander("👀 Conferência Simples: Como estaria o Robô Antigo de Vitória? (Apenas Leitura)", expanded=False):
+st.write("Estes dados não interferem nas métricas financeiras acima. São apenas os resultados que o código original de vitória teria alcançado em sombra no mesmo período.")
+
+        if df_sombra.empty:
+            st.info("Nenhuma entrada do Robô Antigo registrada neste período.")
+        else:
+            s_tot = len(df_sombra[df_sombra['status'].str.strip().str.title().isin(['Green', 'Red'])])
+            s_greens = len(df_sombra[df_sombra['status'].str.strip().str.title() == 'Green'])
+            s_lucro = df_sombra['lucro_prejuizo'].sum()
+            s_wr = (s_greens / s_tot * 100) if s_tot > 0 else 0
+
+            s_c1, s_c2, s_c3 = st.columns(3)
+            s_c1.metric("Entradas Validadas", s_tot)
+            s_c2.metric("Assertividade Antiga", f"{s_wr:.1f}%")
+            s_c3.metric("Lucro Hipotético", f"R$ {s_lucro:.2f}")
+
+            st.write("**Histórico de Jogos do Robô Antigo:**")
             st.dataframe(
-                df_historico_view.style.format({
-                    'odd_comprada': '{:.2f}',
-                    'valor_apostado': 'R$ {:.2f}',
-                    'lucro_prejuizo': 'R$ {:.2f}'
+                df_sombra[['data_registro', 'jogo', 'recomendacao', 'odd_comprada', 'lucro_prejuizo', 'status']].style.format({
+                    'odd_comprada': '{:.2f}', 'lucro_prejuizo': 'R$ {:.2f}'
                 }).map(colorir_lucro, subset=['lucro_prejuizo']),
                 use_container_width=True
             )
-        conn.close()
-
-# ---------------------------------------------------------
-# ABA 5: PARÂMETROS & CONFIGURAÇÕES
-# ---------------------------------------------------------
+conn.close()
+---------------------------------------------------------
+ABA 5: PARÂMETROS & CONFIGURAÇÕES
+---------------------------------------------------------
 elif aba == "5. Parâmetros & Configurações":
-    st.header("⚙️ Parâmetros de Entrada por Projeto")
-    st.write("Ajuste as regras de filtragem, limite de recomendações e stake fixa padrão para cada estratégia.")
+st.header("⚙️ Parâmetros de Entrada por Projeto")
+scripts_disp = [
+'Cantos (Over 9.5)',
+'Gols (Over 2.5)',
+'Gols (Over 1.5)',
+'Vitória / Dominância (Novo)',
+'Vitória (Versão Antiga - Validação)'
+]
 
-    scripts_disponiveis = [
-        'Cantos (Over 9.5)',
-        'Gols (Over 2.5)',
-        'Gols (Over 1.5)',
-        'Vitória / Dominância (Novo)',
-        'Vitória (Versão Antiga - Validação)'
-    ]
-
-    for script in scripts_disponiveis:
-        cfg = configs_atuais.get(script, {
-            'stake_padrao': 50.0,
-            'top_n': 10,
-            'permitir_copas': False,
-            'permitir_sub20': False,
-            'permitir_feminino': False
-        })
-
-        with st.expander(f"🛠️ Parâmetros do Projeto: {script}", expanded=False):
-            col_cfg1, col_cfg2 = st.columns(2)
-
-            with col_cfg1:
-                nova_stake = st.number_input(f"Stake Fixa Padrão (R$):", value=float(cfg['stake_padrao']), step=5.0, key=f"cfg_stake_{script}")
-                novo_top_n = st.number_input(f"Limite de Retornos (Top N jogos):", value=int(cfg['top_n']), min_value=1, max_value=100, step=1, key=f"cfg_top_{script}")
-
-            with col_cfg2:
-                st.write("**Filtros de Ligas Aceitas:**")
-                perm_copas = st.checkbox("Incluir Copas e Torneios Eliminatórios", value=bool(cfg['permitir_copas']), key=f"cfg_copas_{script}")
-                perm_sub20 = st.checkbox("Incluir Ligas Sub-20 / Sub-23 / Formação", value=bool(cfg['permitir_sub20']), key=f"cfg_sub_{script}")
-                perm_fem = st.checkbox("Incluir Jogos de Futebol Feminino", value=bool(cfg['permitir_feminino']), key=f"cfg_fem_{script}")
-
-            if st.button(f"💾 Salvar Parâmetros para {script}", key=f"btn_save_cfg_{script}", use_container_width=True):
-                conn = sqlite3.connect("oportunidades.db")
-                c = conn.cursor()
-                sql_save_cfg = """
-                    INSERT OR REPLACE INTO configuracoes (script_nome, stake_padrao, top_n, permitir_copas, permitir_sub20, permitir_feminino)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """
-                c.execute(sql_save_cfg, (script, nova_stake, novo_top_n, int(perm_copas), int(perm_sub20), int(perm_fem)))
-                conn.commit()
-                conn.close()
-                st.toast(f"Parâmetros de '{script}' atualizados com sucesso!")
-                st.rerun()
+for script in scripts_disp:
+    cfg = configs_atuais.get(script, {
+        'stake_padrao': 50.0, 
+        'top_n': 10, 
+        'permitir_copas': False, 
+        'permitir_sub20': False, 
+        'permitir_feminino': False
+    })
+    with st.expander(f"🛠️ Parâmetros: {script}", expanded=False):
+        col_cfg1, col_cfg2 = st.columns(2)
+        with col_cfg1:
+            nova_stake = st.number_input(f"Stake (R$):", value=float(cfg['stake_padrao']), step=5.0, key=f"stake_{script}")
+            novo_top_n = st.number_input(f"Top N:", value=int(cfg['top_n']), min_value=1, step=1, key=f"top_{script}")
+        with col_cfg2:
+            perm_copas = st.checkbox("Incluir Copas", value=bool(cfg['permitir_copas']), key=f"copas_{script}")
+            perm_sub20 = st.checkbox("Incluir Sub-20", value=bool(cfg['permitir_sub20']), key=f"sub_{script}")
+            perm_fem = st.checkbox("Incluir Feminino", value=bool(cfg['permitir_feminino']), key=f"fem_{script}")
+        
+        if st.button(f"💾 Salvar {script}", key=f"save_{script}", use_container_width=True):
+            conn = sqlite3.connect("oportunidades.db")
+            conn.execute("""
+                INSERT OR REPLACE INTO configuracoes 
+                (script_nome, stake_padrao, top_n, permitir_copas, permitir_sub20, permitir_feminino) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (script, nova_stake, novo_top_n, int(perm_copas), int(perm_sub20), int(perm_fem)))
+            conn.commit()
+            conn.close()
+            st.toast(f"Parâmetros salvos para {script}!")
+            st.rerun()
