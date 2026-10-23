@@ -418,11 +418,11 @@ elif aba == "4. Dashboard Financeiro":
                 novo_valor = ec3.number_input("Novo Valor Apostado (R$):", value=float(row_edit["valor_apostado"]), step=5.0)
 
                 if ec4.button("💾 Salvar Alterações", use_container_width=True):
-                  novo_lucro = (nova_odd - 1) * novo_valor if novo_status == "Green" else (-novo_valor if novo_status == "Red" else 0.0)
+                    novo_lucro = (nova_odd - 1) * novo_valor if novo_status == "Green" else (-novo_valor if novo_status == "Red" else 0.0)
                     db.editar_entrada(id_selecionado, novo_status, nova_odd, novo_valor, novo_lucro)
                     st.success("✅ Aposta atualizada com sucesso!")
                     st.rerun()
-
+                    
                 if ec4.button("🗑️ Deletar Registro", use_container_width=True):
                     db.deletar_entrada(id_selecionado)
                     st.success("🗑️ Aposta removida do histórico!")
